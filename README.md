@@ -132,11 +132,11 @@ npm -v # Should print "11.20.0".
 my initial planned folder structure
 
 DataLens/
-|
+
 |---  client/ — React frontend, dashboards and UI
-|
+
 |--- server/ — Express API, MongoDB integration and data-quality logic
-|
+
 |---docs/ — Project evidence and technical documentation
 
     |    requirements/ — User stories and acceptance criteria
