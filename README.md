@@ -89,3 +89,66 @@ CSV formula injection	Safe handling of exported spreadsheet cells
 IDOR	Ownership checks on every dataset operation
 Data leakage	User-specific access controls and minimal data retention
 API abuse	Rate limiting and request limits
+
+
+
+
+VS Code extensions
+
+Extension	Purpose
+ESLint	JavaScript code quality
+Prettier - Code formatter	Consistent formatting
+MongoDB for VS Code	Database exploration
+GitLens	Git history and code changes
+Thunder Client	Optional API testing inside VS Code
+Tailwind CSS IntelliSense	Tailwind autocomplete
+Error Lens	Inline error visibility
+
+These are development conveniences, not dependencies of the application.
+
+
+
+
+#Installing NodeJs
+source - https://nodejs.org/en/download
+on the official website select your device config and then paste the code given by nodejs into command prompt of your device. my code generated for v26 - windows - fnm - npm is below. 
+
+# Download and install fnm:
+winget install Schniz.fnm
+# In lieu of restarting the shell
+fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+# Download and install Node.js:
+fnm install --use 26
+# Verify the Node.js version:
+node -v # Should print "v26.13.0".
+# Verify npm version:
+npm -v # Should print "11.20.0".
+
+
+# Also installed git
+
+
+#After all installations create the required folder structure.
+my initial planned folder structure
+
+DataLens/
+|
+|---  client/ — React frontend, dashboards and UI
+|
+|--- server/ — Express API, MongoDB integration and data-quality logic
+|
+|---docs/ — Project evidence and technical documentation
+
+    |    requirements/ — User stories and acceptance criteria
+    |
+    |   architecture/ — System and database diagrams
+    |
+    |   research/ — References and technology decisions
+    |
+    |   testing/ — Test plans, results and defect records
+    |
+    |   ai-acknowledgements/ — Transparent record of AI assistance
+
+replicate it with this command:
+mkdir client, server, docs
+mkdir docs\requirements, docs\architecture, docs\research, docs\testing, docs\ai-acknowledgements
