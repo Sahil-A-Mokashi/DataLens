@@ -152,3 +152,6 @@ DataLens/
 replicate it with this command:
 mkdir client, server, docs
 mkdir docs\requirements, docs\architecture, docs\research, docs\testing, docs\ai-acknowledgements
+
+
+# adding comment
