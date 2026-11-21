@@ -154,4 +154,3 @@ mkdir client, server, docs
 mkdir docs\requirements, docs\architecture, docs\research, docs\testing, docs\ai-acknowledgements
 
 
-# adding comment
