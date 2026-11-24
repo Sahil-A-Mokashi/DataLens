@@ -14,11 +14,21 @@ const app = express();
 
 app.use(helmet());
 
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
-  })
-);
+const allowedOrigins = (
+  process.env.CLIENT_URL || "http://localhost:5173"
+)
+  .split(",")
+  .map(origin => origin.trim());
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Origin not allowed by CORS"));
+  }
+}));
 
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", authRoutes);
@@ -65,5 +75,37 @@ async function startServer() {
     process.exit(1);
   }
 }
+
+// Handle unknown API routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API endpoint not found"
+  });
+});
+
+// Centralised error handling
+app.use((error, req, res, next) => {
+  console.error("Request error:", error.message);
+
+  if (error.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
+      success: false,
+      message: "File exceeds the maximum upload size of 2 MB"
+    });
+  }
+
+  if (error.message === "Only CSV files are allowed") {
+    return res.status(400).json({
+      success: false,
+      message: "Only CSV files are allowed"
+    });
+  }
+
+  return res.status(500).json({
+    success: false,
+    message: "An unexpected server error occurred"
+  });
+});
 
 startServer();
