@@ -7,7 +7,9 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const datasetRoutes = require("./routes/datasetRoutes");
 const app = express();
+
 
 app.use(helmet());
 
@@ -19,6 +21,7 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", authRoutes);
+app.use("/api/datasets", datasetRoutes);
 
 app.use(
   rateLimit({
