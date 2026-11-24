@@ -1,4 +1,6 @@
 
+
+const { profileDataset } = require("../services/profilingService");
 const multer = require("multer");
 const Papa = require("papaparse");
 const Dataset = require("../models/Dataset");
@@ -118,6 +120,7 @@ exports.uploadCSV = [
         });
       }
 
+      const profiling = profileDataset(records, columns);
       const dataset = await Dataset.create({
         owner: req.user._id,
         name: req.file.originalname.replace(/\.csv$/i, ""),
@@ -133,6 +136,8 @@ exports.uploadCSV = [
           invalidValues: 0,
         },
         status: "analysed",
+        profile: profiling.columns,
+        lastAnalysisAt: profiling.analysedAt,
       });
 
       return res.status(201).json({

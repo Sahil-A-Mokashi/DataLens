@@ -653,3 +653,77 @@ tbody tr:last-child td { border-bottom: 0; }
   stroke-width: 2.5;
   box-sizing: content-box;
 }
+
+
+/* Column-by-column cleaning strategies */
+.column-cleaning-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.column-strategy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.column-strategy-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.column-strategy-info strong {
+  color: #1e293b;
+  font-size: 15px;
+}
+
+.column-strategy-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.column-strategy-card select,
+.column-strategy-card input {
+  width: 100%;
+  max-width: 420px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 14px;
+  outline: none;
+}
+
+.column-strategy-card select:focus,
+.column-strategy-card input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+@media (max-width: 640px) {
+  .column-strategy-card {
+    padding: 14px;
+  }
+
+  .column-strategy-card select,
+  .column-strategy-card input {
+    max-width: 100%;
+  }
+}

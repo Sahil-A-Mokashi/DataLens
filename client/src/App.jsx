@@ -45,7 +45,7 @@ function App() {
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [cleaningPreview, setCleaningPreview] = useState(null);
   const [versions, setVersions] = useState([]);
-  const [replacement, setReplacement] = useState("Not provided");
+  const [columnStrategies, setColumnStrategies] = useState({});
   const cleaningPanelRef = useRef(null);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -245,6 +245,26 @@ useEffect(() => {
       const versionsData = await versionsResponse.json();
 
       setCleaningPreview(previewData.preview);
+
+      const initialStrategies = {};
+
+      (previewData.preview.missingColumns || []).forEach(item => {
+        const available = item.availableStrategies || [];
+
+        const suggestedMethod = available.some(
+          option => option.value === item.suggestedMethod
+        )
+          ? item.suggestedMethod
+          : available[0]?.value || "keep";
+
+        initialStrategies[item.column] = {
+          method: suggestedMethod,
+          value: ""
+        };
+      });
+
+
+      setColumnStrategies(initialStrategies);
       setVersions(versionsData.versions || []);
     } catch (err) {
       setError(err.message);
@@ -268,8 +288,8 @@ useEffect(() => {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            missingValueReplacement: replacement
-          })
+          columnStrategies
+        })
         }
       );
 
@@ -1044,18 +1064,94 @@ async function searchOpenData(event) {
                   <p>No missing cells detected.</p>
                 )}
 
-                <label className="replacement-field">
-                  Replacement value for missing cells
-                  <input
-                    value={replacement}
-                    onChange={event => setReplacement(event.target.value)}
-                  />
-                </label>
+                        
+        <div className="column-cleaning-section">
+          <h3>Choose a cleaning strategy for each column</h3>
+          <p>
+            Select how DataLens should handle missing values in each column.
+            You can choose a different method for every column.
+          </p>
+
+          {cleaningPreview.missingColumns?.length ? (
+            cleaningPreview.missingColumns.map(item => {
+              const selected = columnStrategies[item.column] || {
+                method: item.suggestedMethod || "keep",
+                value: ""
+              };
+
+              return (
+                <div className="column-strategy-card" key={item.column}>
+                  <div className="column-strategy-info">
+                    <strong>{item.column}</strong>
+                    <span>
+                      {item.inferredType} · {item.missingCount} missing values
+                      ({item.missingPercentage}%)
+                    </span>
+                  </div>
+
+                  <label>
+                    Cleaning method
+                    <select
+                      value={selected.method}
+                      onChange={event =>
+                        setColumnStrategies(previous => ({
+                          ...previous,
+                          [item.column]: {
+                            ...previous[item.column],
+                            method: event.target.value
+                          }
+                        }))
+                      }
+                    >
+                      {item.availableStrategies.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {selected.method === "custom" && (
+                    <label>
+                      Custom replacement value
+                      <input
+                        type="text"
+                        value={selected.value || ""}
+                        placeholder={`Enter replacement for ${item.column}`}
+                        onChange={event =>
+                          setColumnStrategies(previous => ({
+                            ...previous,
+                            [item.column]: {
+                              ...previous[item.column],
+                              method: "custom",
+                              value: event.target.value
+                            }
+                          }))
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            <p>No missing values require a column-specific strategy.</p>
+          )}
+        </div>
+
+        
 
                 <button
                   className="primary-button"
                   onClick={applyCleaning}
-                  disabled={cleaning || !replacement.trim()}
+                  disabled={
+                    cleaning ||
+                    Object.values(columnStrategies).some(
+                      strategy =>
+                        strategy.method === "custom" &&
+                        !strategy.value?.trim()
+                    )
+                  }
                 >
                   <Sparkles size={16} />
                   {cleaning ? "Applying..." : "Apply cleaning and create new version"}
