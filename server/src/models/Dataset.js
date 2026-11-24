@@ -45,6 +45,7 @@ const datasetSchema = new mongoose.Schema(
       select: false,
     },
 
+    // Overall data quality score (0–100)
     qualityScore: {
       type: Number,
       default: 100,
@@ -52,10 +53,50 @@ const datasetSchema = new mongoose.Schema(
       max: 100,
     },
 
+    // Existing issue counts — retained for compatibility
     issueSummary: {
       missingValues: { type: Number, default: 0 },
       duplicateRows: { type: Number, default: 0 },
       invalidValues: { type: Number, default: 0 },
+    },
+
+    // Detailed quality dimensions
+    qualityMetrics: {
+      completeness: { type: Number, default: 100 },
+      validity: { type: Number, default: 100 },
+      consistency: { type: Number, default: 100 },
+      uniqueness: { type: Number, default: 100 },
+    },
+
+    // Per-column profiling results
+    profile: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    // CSV structure and parsing warnings
+    structuralIssues: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
+
+    // Heuristic assessment — not measured model performance
+    mlReadiness: {
+      score: { type: Number, min: 0, max: 100 },
+      level: {
+        type: String,
+        enum: ["low", "moderate", "high", null],
+        default: null,
+      },
+      warnings: {
+        type: [mongoose.Schema.Types.Mixed],
+        default: [],
+      },
+    },
+
+    lastAnalysisAt: {
+      type: Date,
+      default: null,
     },
 
     status: {

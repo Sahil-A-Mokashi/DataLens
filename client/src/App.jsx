@@ -406,7 +406,10 @@ async function searchOpenData(event) {
       <div className="auth-page">
         <div className="auth-card">
           <div className="brand auth-brand">
-            <div className="brand-icon"><Activity size={22} /></div>
+            <div className="brand-icon datalens-brand-icon">
+              <Database size={26} className="brand-database-mark" />
+              <Search size={14} className="brand-lens-mark" />
+            </div>
             <span>Data<span className="brand-light">Lens</span></span>
           </div>
 
@@ -414,8 +417,8 @@ async function searchOpenData(event) {
           <h1>{authMode === "login" ? "Welcome back" : "Create your account"}</h1>
           <p className="subtitle">
             {authMode === "login"
-              ? "Sign in to manage and assess your datasets."
-              : "Register to start analysing your data."}
+              ? "Sign in to profile, analyse and improve your data quality."
+              : "Create your workspace and start building better-quality datasets."}
           </p>
 
           {error && <div className="error-message">{error}</div>}
@@ -496,7 +499,10 @@ async function searchOpenData(event) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-icon"><Activity size={22} /></div>
+          <div className="brand-icon datalens-brand-icon">
+            <Database size={26} className="brand-database-mark" />
+            <Search size={14} className="brand-lens-mark" />
+          </div>
           <span>Data<span className="brand-light">Lens</span></span>
         </div>
 
@@ -561,10 +567,10 @@ async function searchOpenData(event) {
 
         <section className="page-heading">
           <div>
-            <p className="eyebrow">DATA QUALITY PLATFORM</p>
-            <h1>Dashboard</h1>
+            <p className="eyebrow">DATA QUALITY & INTELLIGENCE</p>
+            <h1>Data Quality Command Center</h1>
             <p className="subtitle">
-              Monitor, assess and improve the quality of your datasets.
+              Profile, monitor, clean and prepare your data for reliable analytics and machine learning.
             </p>
           </div>
 
