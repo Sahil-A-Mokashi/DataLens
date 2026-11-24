@@ -45,8 +45,14 @@ function App() {
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [cleaningPreview, setCleaningPreview] = useState(null);
   const [versions, setVersions] = useState([]);
-  const [columnStrategies, setColumnStrategies] = useState({});
-  const cleaningPanelRef = useRef(null);
+  const [selectedVersion, setSelectedVersion] = useState(null);
+const [columnStrategies, setColumnStrategies] = useState({});
+
+const [schemaSelections, setSchemaSelections] = useState({});
+const [schemaResults, setSchemaResults] = useState({});
+const [schemaLoading, setSchemaLoading] = useState({});
+
+const cleaningPanelRef = useRef(null);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -232,6 +238,7 @@ useEffect(() => {
     setSelectedDataset(dataset);
     setCleaningPreview(null);
     setVersions([]);
+    setSelectedVersion(null);
     setError("");
     setMessage("");
 
@@ -270,6 +277,65 @@ useEffect(() => {
       setError(err.message);
     }
   }
+
+
+
+async function validateSchema(column) {
+  if (!selectedDataset) return;
+
+  const profile = selectedDataset.profile?.find(
+    item => item.column === column
+  );
+
+  const expectedType =
+    schemaSelections[column] ||
+    (["numeric", "categorical", "boolean", "date"].includes(profile?.inferredType)
+      ? profile.inferredType
+      : "");
+
+  if (!expectedType) {
+    setError("Please select an expected data type first.");
+    return;
+  }
+
+  setSchemaSelections(previous => ({
+    ...previous,
+    [column]: expectedType
+  }));
+
+  setSchemaLoading(previous => ({
+    ...previous,
+    [column]: true
+  }));
+
+  setError("");
+
+  try {
+    const response = await apiRequest(
+      `/api/datasets/${selectedDataset._id}/validate-schema`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ column, expectedType })
+      }
+    );
+
+    const data = await response.json();
+
+    setSchemaResults(previous => ({
+      ...previous,
+      [column]: data.validation
+    }));
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setSchemaLoading(previous => ({
+      ...previous,
+      [column]: false
+    }));
+  }
+}
+
 
 
   async function applyCleaning() {
@@ -410,6 +476,40 @@ async function searchOpenData(event) {
         ) / datasets.length
       ).toFixed(1)
     : "0.0";
+
+  const datasetProfiles = selectedDataset?.profile || [];
+
+const profileTotals = datasetProfiles.reduce(
+  (totals, item) => ({
+    total: totals.total + (item.totalCount || 0),
+    nonMissing: totals.nonMissing + (item.nonMissingCount || 0),
+    duplicates: totals.duplicates + (item.duplicateValueCount || 0),
+    valid: totals.valid + (
+      ["valid", "mismatch"].includes(item.schemaValidation?.status)
+        ? item.schemaValidation.validCount || 0
+        : 0
+    ),
+    checked: totals.checked + (
+      ["valid", "mismatch"].includes(item.schemaValidation?.status)
+        ? (item.schemaValidation.validCount || 0) +
+          (item.schemaValidation.mismatchCount || 0)
+        : 0
+    )
+  }),
+  { total: 0, nonMissing: 0, duplicates: 0, valid: 0, checked: 0 }
+);
+
+const datasetMetrics = {
+  completeness: profileTotals.total
+    ? Math.round(profileTotals.nonMissing / profileTotals.total * 100)
+    : 0,
+  uniqueness: profileTotals.nonMissing
+    ? Math.round((1 - profileTotals.duplicates / profileTotals.nonMissing) * 100)
+    : 0,
+  schemaValidity: profileTotals.checked
+    ? Math.round(profileTotals.valid / profileTotals.checked * 100)
+    : null
+};
 
   const highQualityCount = datasets.filter(
     dataset => dataset.qualityScore >= 95
@@ -988,6 +1088,52 @@ async function searchOpenData(event) {
             </div>
 
             
+<div className="dataset-health-section">
+  <div className="dataset-health-heading">
+    <div>
+      <p className="eyebrow">DATASET HEALTH</p>
+      <h3>Current quality assessment</h3>
+      <p>Measured quality indicators for this dataset.</p>
+    </div>
+    <div className="dataset-health-score">
+      <strong>{selectedDataset.qualityScore ?? 0}%</strong>
+      <span>Overall quality</span>
+    </div>
+  </div>
+
+  <div className="dataset-health-grid">
+    <div className="dataset-health-card">
+      <span>Completeness</span>
+      <strong>{datasetMetrics.completeness}%</strong>
+      <div className="health-track">
+        <div style={{ width: `${datasetMetrics.completeness}%` }} />
+      </div>
+    </div>
+
+    <div className="dataset-health-card">
+      <span>Uniqueness</span>
+      <strong>{datasetMetrics.uniqueness}%</strong>
+      <div className="health-track">
+        <div style={{ width: `${datasetMetrics.uniqueness}%` }} />
+      </div>
+    </div>
+
+    <div className="dataset-health-card">
+      <span>Schema validity</span>
+      <strong>
+        {datasetMetrics.schemaValidity === null
+          ? "Not assessed"
+          : `${datasetMetrics.schemaValidity}%`}
+      </strong>
+      <div className="health-track">
+        <div style={{
+          width: `${datasetMetrics.schemaValidity ?? 0}%`
+        }} />
+      </div>
+    </div>
+  </div>
+</div>
+
             <div className="version-history">
               <h3>Version history</h3>
               <p>Track changes made to this dataset.</p>
@@ -1005,7 +1151,11 @@ async function searchOpenData(event) {
                   </thead>
                   <tbody>
                     {versions.map(version => (
-                      <tr key={version.versionNumber}>
+                      <tr
+                      key={version.versionNumber}
+                      onClick={() => setSelectedVersion(version)}
+                      className="version-clickable-row"
+>
                         <td>
                           <strong>{version.label}</strong>
                           {version.versionNumber === 1 && (
@@ -1023,6 +1173,55 @@ async function searchOpenData(event) {
                   </tbody>
                 </table>
               </div>
+
+{selectedVersion && (
+  <div className="version-details">
+    <div className="panel-heading">
+      <div>
+        <h3>{selectedVersion.label || `Version ${selectedVersion.versionNumber}`}</h3>
+        <p>Selected version details</p>
+      </div>
+      <button
+        className="text-button"
+        onClick={() => setSelectedVersion(null)}
+      >
+        Close
+      </button>
+    </div>
+
+    <div className="dataset-health-grid">
+      <div className="dataset-health-card">
+        <span>Version</span>
+        <strong>V{selectedVersion.versionNumber}</strong>
+      </div>
+      <div className="dataset-health-card">
+        <span>Rows</span>
+        <strong>{selectedVersion.rowCount ?? "—"}</strong>
+      </div>
+      <div className="dataset-health-card">
+        <span>Quality score</span>
+        <strong>{selectedVersion.qualityScore ?? "—"}%</strong>
+      </div>
+      <div className="dataset-health-card">
+        <span>Missing values filled</span>
+        <strong>{selectedVersion.changeSummary?.missingValuesFilled ?? 0}</strong>
+      </div>
+      <div className="dataset-health-card">
+        <span>Duplicates removed</span>
+        <strong>{selectedVersion.changeSummary?.duplicateRowsRemoved ?? 0}</strong>
+      </div>
+      <div className="dataset-health-card">
+        <span>Created</span>
+        <strong>
+          {selectedVersion.createdAt
+            ? new Date(selectedVersion.createdAt).toLocaleString()
+            : "—"}
+        </strong>
+      </div>
+    </div>
+  </div>
+)}
+
             </div>
 
 
@@ -1042,6 +1241,132 @@ async function searchOpenData(event) {
                     <strong>{cleaningPreview.duplicateRowsFound}</strong>
                   </div>
                 </div>
+
+<div className="schema-validation-section">
+  <h3>Schema Validation</h3>
+  <p>
+    Review automatically inferred data types or select an expected
+    type manually to identify inconsistent values.
+  </p>
+
+  <div className="schema-validation-list">
+    {(selectedDataset.profile || []).map(profile => {
+      const column = profile.column;
+
+      const inferredType = profile.inferredType;
+      const currentType =
+        schemaSelections[column] ??
+        (["numeric", "categorical", "boolean", "date"].includes(inferredType)
+          ? inferredType
+          : "");
+
+      const result = schemaResults[column];
+      const isLoading = schemaLoading[column];
+
+      return (
+        <div className="schema-validation-card" key={column}>
+          <div className="schema-column-heading">
+            <strong>{column}</strong>
+            <span>
+              Automatically detected: {inferredType}
+            </span>
+          </div>
+
+          <div className="schema-controls">
+            <label>
+              Expected data type
+              <select
+                value={currentType}
+                onChange={event => {
+                  setSchemaSelections(previous => ({
+                    ...previous,
+                    [column]: event.target.value
+                  }));
+
+                  setSchemaResults(previous => ({
+                    ...previous,
+                    [column]: null
+                  }));
+                }}
+              >
+                <option value="">Select expected type</option>
+                <option value="numeric">Numeric</option>
+                <option value="categorical">Text / Categorical</option>
+                <option value="boolean">Boolean</option>
+                <option value="date">Date</option>
+              </select>
+            </label>
+
+            <button
+              className="secondary-button"
+              disabled={!currentType || isLoading}
+              onClick={() => validateSchema(column)}
+            >
+              {isLoading ? "Validating..." : "Validate column"}
+            </button>
+          </div>
+
+          {result && (
+            <div className="schema-validation-results">
+              <div className="schema-result-stats">
+                <div>
+                  <span>Valid values</span>
+                  <strong>{result.validCount}</strong>
+                </div>
+
+                <div>
+                  <span>Invalid values</span>
+                  <strong>{result.mismatchCount}</strong>
+                </div>
+
+                <div>
+                  <span>Mismatch rate</span>
+                  <strong>{result.mismatchPercentage}%</strong>
+                </div>
+              </div>
+
+              <div className={`schema-result-status ${
+                result.status === "valid" ? "valid" : "invalid"
+              }`}>
+                              {result.status === "valid"
+                                ? "All non-missing values match the selected type."
+                                : result.status === "empty"
+                                  ? "No non-missing values available to validate."
+                                  : "Schema mismatch detected. Review the invalid values below."}
+                            </div>
+
+                            {result.mismatches?.length > 0 && (
+                              <div className="table-wrap">
+                                <table>
+                                  <thead>
+                                    <tr>
+                                      <th>DATA ROW</th>
+                                      <th>INVALID VALUE</th>
+                                      <th>DETECTED TYPE</th>
+                                      <th>EXPECTED TYPE</th>
+                                    </tr>
+                                  </thead>
+
+                                  <tbody>
+                                    {result.mismatches.map((item, index) => (
+                                      <tr key={`${item.row}-${index}`}>
+                                        <td>{item.row}</td>
+                                        <td>{item.value}</td>
+                                        <td>{item.detectedType}</td>
+                                        <td>{item.expectedType}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
                 <h3>Detected missing cells</h3>
                 {cleaningPreview.missingCells.length ? (

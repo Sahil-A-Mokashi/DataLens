@@ -157,17 +157,18 @@ const calculateNumericStats = (values) => {
   };
 };
 
-const validateColumnSchema = (values, inferredType) => {
+
+const validateColumnSchema = (values, expectedType) => {
   const nonMissing = values.filter((value) => !isMissing(value));
 
-  if (["empty", "mixed"].includes(inferredType)) {
+  if (!nonMissing.length) {
     return {
-      expectedType: inferredType,
+      expectedType,
       validCount: 0,
       mismatchCount: 0,
       mismatchPercentage: 0,
       mismatches: [],
-      status: inferredType === "empty" ? "empty" : "review_required"
+      status: "empty"
     };
   }
 
@@ -179,14 +180,37 @@ const validateColumnSchema = (values, inferredType) => {
 
     const actualType = classifyValue(value);
 
-    if (actualType === inferredType) {
+    let isValid = false;
+
+    switch (expectedType) {
+      case "numeric":
+        isValid = actualType === "numeric";
+        break;
+
+      case "categorical":
+        isValid = true;
+        break;
+
+      case "boolean":
+        isValid = actualType === "boolean";
+        break;
+
+      case "date":
+        isValid = actualType === "date";
+        break;
+
+      default:
+        isValid = false;
+    }
+
+    if (isValid) {
       validCount++;
     } else {
       mismatches.push({
         row: index + 2,
         value: String(value),
         detectedType: actualType,
-        expectedType: inferredType
+        expectedType
       });
     }
   });
@@ -194,18 +218,17 @@ const validateColumnSchema = (values, inferredType) => {
   const mismatchCount = mismatches.length;
 
   return {
-    expectedType: inferredType,
+    expectedType,
     validCount,
     mismatchCount,
-    mismatchPercentage: nonMissing.length
-      ? Number(
-          ((mismatchCount / nonMissing.length) * 100).toFixed(2)
-        )
-      : 0,
+    mismatchPercentage: Number(
+      ((mismatchCount / nonMissing.length) * 100).toFixed(2)
+    ),
     mismatches,
     status: mismatchCount > 0 ? "mismatch" : "valid"
   };
 };
+
 
 const profileColumn = (records, column) => {
   const values = records.map((record) => record[column]);
@@ -224,9 +247,12 @@ const profileColumn = (records, column) => {
   );
 
   const numericValues =
-    inferredType === "numeric"
-      ? nonMissing.map(Number)
-      : [];
+  inferredType === "numeric"
+    ? nonMissing
+        .filter(value => classifyValue(value) === "numeric")
+        .map(Number)
+        .filter(Number.isFinite)
+    : [];
 
   const frequencies = new Map();
 

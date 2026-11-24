@@ -1,6 +1,9 @@
 
 
-const { profileDataset } = require("../services/profilingService");
+const {
+  profileDataset,
+  validateColumnSchema
+} = require("../services/profilingService");
 const multer = require("multer");
 const Papa = require("papaparse");
 const Dataset = require("../models/Dataset");
@@ -153,6 +156,8 @@ exports.uploadCSV = [
           qualityScore: dataset.qualityScore,
           issueSummary: dataset.issueSummary,
           status: dataset.status,
+          profile: dataset.profile,
+          lastAnalysisAt: dataset.lastAnalysisAt,
         },
       });
     } catch (error) {
@@ -213,6 +218,64 @@ exports.getDatasetById = async (req, res) => {
     res.status(400).json({
       success: false,
       message: "Invalid dataset ID",
+    });
+  }
+};
+
+// Validate a dataset column against a user-selected data type
+exports.validateDatasetSchema = async (req, res) => {
+  try {
+    const { column, expectedType } = req.body;
+
+    const allowedTypes = [
+      "numeric",
+      "categorical",
+      "boolean",
+      "date"
+    ];
+
+    if (!column || !expectedType || !allowedTypes.includes(expectedType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid column and expected data type"
+      });
+    }
+
+    const dataset = await Dataset.findOne({
+      _id: req.params.id,
+      owner: req.user._id
+    }).select("+records");
+
+    if (!dataset) {
+      return res.status(404).json({
+        success: false,
+        message: "Dataset not found"
+      });
+    }
+
+    if (!dataset.columns.includes(column)) {
+      return res.status(400).json({
+        success: false,
+        message: "The selected column does not exist in this dataset"
+      });
+    }
+
+    const values = dataset.records.map((record) => record[column]);
+
+    const validation = validateColumnSchema(values, expectedType);
+
+    return res.status(200).json({
+      success: true,
+      message: "Column schema validation completed",
+      column,
+      validation
+    });
+  } catch (error) {
+    console.error("Schema validation error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to validate column schema"
     });
   }
 };

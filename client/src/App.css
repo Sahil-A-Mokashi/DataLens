@@ -727,3 +727,253 @@ tbody tr:last-child td { border-bottom: 0; }
     max-width: 100%;
   }
 }
+
+
+/* Schema Validation */
+.schema-validation-section {
+  margin-top: 30px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.schema-validation-section > p {
+  color: #718096;
+  font-size: 13px;
+  margin: 6px 0 20px;
+}
+
+.schema-validation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.schema-validation-card {
+  padding: 18px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--card-background, #fff);
+}
+
+.schema-column-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.schema-column-heading strong {
+  font-size: 15px;
+}
+
+.schema-column-heading span {
+  color: #718096;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.schema-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.schema-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  min-width: 180px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.schema-controls select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #dce2ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #263247;
+  font: inherit;
+}
+
+.schema-controls button {
+  min-height: 42px;
+}
+
+.schema-validation-results {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #edf0f4;
+}
+
+.schema-result-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.schema-result-stats > div {
+  padding: 13px;
+  background: #f7f9fc;
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.schema-result-stats span {
+  color: #718096;
+  font-size: 12px;
+}
+
+.schema-result-stats strong {
+  font-size: 21px;
+  color: #263247;
+}
+
+.schema-result-status {
+  padding: 11px 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+
+.schema-result-status.valid {
+  color: #167647;
+  background: #eaf8f0;
+}
+
+.schema-result-status.invalid {
+  color: #b42318;
+  background: #fff0ee;
+}
+
+@media (max-width: 600px) {
+  .schema-column-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .schema-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .schema-controls button {
+    width: 100%;
+  }
+
+  .schema-result-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Dataset health overview */
+.dataset-health-section {
+  margin: 24px 0;
+  padding: 22px;
+  border: 1px solid #e6eaf0;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.dataset-health-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+
+.dataset-health-heading h3 {
+  margin: 5px 0;
+}
+
+.dataset-health-heading p {
+  color: #718096;
+  font-size: 13px;
+}
+
+.dataset-health-score {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+}
+
+.dataset-health-score strong {
+  font-size: 32px;
+  color: #2563eb;
+}
+
+.dataset-health-score span,
+.dataset-health-card span {
+  color: #718096;
+  font-size: 12px;
+}
+
+.dataset-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.dataset-health-card {
+  padding: 15px;
+  background: #f7f9fc;
+  border: 1px solid #edf0f4;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dataset-health-card strong {
+  font-size: 22px;
+  color: #263247;
+}
+
+.health-track {
+  height: 6px;
+  background: #e5eaf1;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.health-track > div {
+  height: 100%;
+  background: #3978df;
+  border-radius: inherit;
+}
+
+.version-clickable-row {
+  cursor: pointer;
+}
+
+.version-clickable-row:hover {
+  background: #f4f7fb;
+}
+
+.version-details {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fafbfd;
+}
+
+@media (max-width: 600px) {
+  .dataset-health-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dataset-health-score {
+    text-align: left;
+  }
+}
