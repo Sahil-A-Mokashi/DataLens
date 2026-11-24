@@ -21,8 +21,6 @@ const classifyValue = (value) => {
     return "numeric";
   }
 
-  // Accept common date formats, but avoid treating arbitrary text
-  // as a date merely because Date.parse() accepts it.
   const datePatterns = [
     /^\d{4}-\d{2}-\d{2}$/,
     /^\d{4}-\d{2}-\d{2}[T\s].+/,
@@ -53,22 +51,19 @@ const detectType = (values) => {
   };
 
   nonMissing.forEach((value) => {
-    counts[classifyValue(value)]++;
+    const type = classifyValue(value);
+    if (counts[type] !== undefined) counts[type]++;
   });
 
-  const ranked = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1]);
+  const ranked = Object.entries(counts).sort(
+    (a, b) => b[1] - a[1]
+  );
 
   const [dominantType, dominantCount] = ranked[0];
-  const confidence = dominantCount / nonMissing.length;
 
-  // A dominant type is suggested when at least 80% of
-  // non-empty values follow the same pattern.
-  if (confidence >= 0.8) {
-    return dominantType;
-  }
-
-  return "mixed";
+  return dominantCount / nonMissing.length >= 0.8
+    ? dominantType
+    : "mixed";
 };
 
 const median = (values) => {
@@ -101,7 +96,10 @@ const getMode = (values) => {
     }
   }
 
-  return { value: mode, frequency: highestFrequency };
+  return {
+    value: mode,
+    frequency: highestFrequency
+  };
 };
 
 const percentile = (values, percentileValue) => {
@@ -114,8 +112,84 @@ const percentile = (values, percentileValue) => {
 
   if (lower === upper) return sorted[lower];
 
-  return sorted[lower] +
-    (sorted[upper] - sorted[lower]) * (position - lower);
+  return (
+    sorted[lower] +
+    (sorted[upper] - sorted[lower]) * (position - lower)
+  );
+};
+
+// IQR-based outlier detection.
+// Row numbers refer to CSV row numbers, including the header.
+const detectOutliers = (values) => {
+  const numericEntries = [];
+
+  values.forEach((value, index) => {
+    if (isMissing(value)) return;
+
+    if (classifyValue(value) !== "numeric") return;
+
+    const numericValue = Number(value);
+
+    if (Number.isFinite(numericValue)) {
+      numericEntries.push({
+        row: index + 2,
+        value: numericValue
+      });
+    }
+  });
+
+  if (numericEntries.length < 4) {
+    return {
+      method: "IQR",
+      eligibleCount: numericEntries.length,
+      outlierCount: 0,
+      outlierPercentage: 0,
+      lowerBound: null,
+      upperBound: null,
+      q1: null,
+      q3: null,
+      iqr: null,
+      outliers: [],
+      status: "insufficient_data"
+    };
+  }
+
+  const numericValues = numericEntries.map((item) => item.value);
+
+  const q1 = percentile(numericValues, 0.25);
+  const q3 = percentile(numericValues, 0.75);
+  const iqr = q3 - q1;
+
+  const lowerBound = q1 - 1.5 * iqr;
+  const upperBound = q3 + 1.5 * iqr;
+
+  const outliers = numericEntries
+    .filter(
+      (item) =>
+        item.value < lowerBound ||
+        item.value > upperBound
+    )
+    .map((item) => ({
+      row: item.row,
+      value: item.value,
+      direction: item.value < lowerBound ? "low" : "high"
+    }));
+
+  return {
+    method: "IQR",
+    eligibleCount: numericEntries.length,
+    outlierCount: outliers.length,
+    outlierPercentage: Number(
+      ((outliers.length / numericEntries.length) * 100).toFixed(2)
+    ),
+    lowerBound: Number(lowerBound.toFixed(4)),
+    upperBound: Number(upperBound.toFixed(4)),
+    q1: Number(q1.toFixed(4)),
+    q3: Number(q3.toFixed(4)),
+    iqr: Number(iqr.toFixed(4)),
+    outliers,
+    status: "analysed"
+  };
 };
 
 const calculateNumericStats = (values) => {
@@ -138,9 +212,16 @@ const calculateNumericStats = (values) => {
   const lowerBound = q1 - 1.5 * iqr;
   const upperBound = q3 + 1.5 * iqr;
 
-  const outlierCount = values.filter(
-    (value) => value < lowerBound || value > upperBound
-  ).length;
+  const outliers = values
+    .map((value, index) => ({
+      row: index + 2,
+      value
+    }))
+    .filter(
+      (item) =>
+        item.value < lowerBound ||
+        item.value > upperBound
+    );
 
   return {
     mean: Number(mean.toFixed(4)),
@@ -150,15 +231,36 @@ const calculateNumericStats = (values) => {
     standardDeviation: Number(Math.sqrt(variance).toFixed(4)),
     q1: Number(q1.toFixed(4)),
     q3: Number(q3.toFixed(4)),
-    outlierCount,
+    iqr: Number(iqr.toFixed(4)),
+    lowerBound: Number(lowerBound.toFixed(4)),
+    upperBound: Number(upperBound.toFixed(4)),
+    outlierCount: outliers.length,
     outlierPercentage: Number(
-      ((outlierCount / values.length) * 100).toFixed(2)
-    )
+      ((outliers.length / values.length) * 100).toFixed(2)
+    ),
+    outliers
   };
 };
 
-
 const validateColumnSchema = (values, expectedType) => {
+  const allowedTypes = [
+    "numeric",
+    "categorical",
+    "boolean",
+    "date"
+  ];
+
+  if (!allowedTypes.includes(expectedType)) {
+    return {
+      expectedType,
+      validCount: 0,
+      mismatchCount: 0,
+      mismatchPercentage: 0,
+      mismatches: [],
+      status: "unsupported_type"
+    };
+  }
+
   const nonMissing = values.filter((value) => !isMissing(value));
 
   if (!nonMissing.length) {
@@ -179,29 +281,7 @@ const validateColumnSchema = (values, expectedType) => {
     if (isMissing(value)) return;
 
     const actualType = classifyValue(value);
-
-    let isValid = false;
-
-    switch (expectedType) {
-      case "numeric":
-        isValid = actualType === "numeric";
-        break;
-
-      case "categorical":
-        isValid = true;
-        break;
-
-      case "boolean":
-        isValid = actualType === "boolean";
-        break;
-
-      case "date":
-        isValid = actualType === "date";
-        break;
-
-      default:
-        isValid = false;
-    }
+    const isValid = actualType === expectedType;
 
     if (isValid) {
       validCount++;
@@ -229,36 +309,51 @@ const validateColumnSchema = (values, expectedType) => {
   };
 };
 
-
 const profileColumn = (records, column) => {
   const values = records.map((record) => record[column]);
-  const nonMissing = values.filter((value) => !isMissing(value));
+
+  const nonMissing = values.filter(
+    (value) => !isMissing(value)
+  );
+
   const distinctValues = new Set(
-    nonMissing.map((value) => String(value))
+    nonMissing.map((value) => String(value).trim())
   );
 
   const missingCount = values.length - nonMissing.length;
   const uniqueCount = distinctValues.size;
   const inferredType = detectType(values);
 
-  const schemaValidation = validateColumnSchema(
-    values,
-    inferredType
-  );
+  // Mixed columns need manual schema selection.
+  // Do not incorrectly mark every value as invalid.
+  const schemaValidation =
+    inferredType === "mixed" || inferredType === "empty"
+      ? {
+          expectedType: inferredType,
+          validCount: 0,
+          mismatchCount: 0,
+          mismatchPercentage: 0,
+          mismatches: [],
+          status: "review_required"
+        }
+      : validateColumnSchema(values, inferredType);
 
-  const numericValues =
-  inferredType === "numeric"
-    ? nonMissing
-        .filter(value => classifyValue(value) === "numeric")
-        .map(Number)
-        .filter(Number.isFinite)
-    : [];
+  // Detect outliers among numeric values even if a column
+  // contains a small number of non-numeric entries.
+  const numericValues = nonMissing
+    .filter((value) => classifyValue(value) === "numeric")
+    .map(Number)
+    .filter(Number.isFinite);
 
   const frequencies = new Map();
 
   nonMissing.forEach((value) => {
     const key = String(value).trim();
-    frequencies.set(key, (frequencies.get(key) || 0) + 1);
+
+    frequencies.set(
+      key,
+      (frequencies.get(key) || 0) + 1
+    );
   });
 
   const mode = getMode(
@@ -280,25 +375,38 @@ const profileColumn = (records, column) => {
 
   const duplicateValueCount = nonMissing.length - uniqueCount;
 
+  const numericStats = calculateNumericStats(numericValues);
+  const outlierDetection = detectOutliers(values);
+
   const profile = {
     column,
     inferredType,
     totalCount: values.length,
     nonMissingCount: nonMissing.length,
     missingCount,
+
     missingPercentage: values.length
-      ? Number(((missingCount / values.length) * 100).toFixed(2))
+      ? Number(
+          ((missingCount / values.length) * 100).toFixed(2)
+        )
       : 0,
+
     uniqueCount,
     duplicateValueCount,
+
     distinctPercentage: nonMissing.length
-      ? Number(((uniqueCount / nonMissing.length) * 100).toFixed(2))
+      ? Number(
+          ((uniqueCount / nonMissing.length) * 100).toFixed(2)
+        )
       : 0,
+
     mode,
     isConstant,
     isHighCardinality,
     whitespaceCount,
-    numericStats: calculateNumericStats(numericValues),
+    numericStats,
+    outlierDetection,
+
     categoryFrequencies:
       inferredType === "categorical"
         ? Array.from(frequencies.entries())
@@ -306,6 +414,7 @@ const profileColumn = (records, column) => {
             .sort((a, b) => b.count - a.count)
             .slice(0, 20)
         : [],
+
     schemaValidation,
     warnings: []
   };
@@ -334,7 +443,8 @@ const profileColumn = (records, column) => {
     profile.warnings.push({
       type: "mixed_data_types",
       severity: "high",
-      message: "No single data type dominates this column. Manual schema selection is recommended."
+      message:
+        "No single data type dominates this column. Manual schema selection is recommended."
     });
   }
 
@@ -350,7 +460,8 @@ const profileColumn = (records, column) => {
     profile.warnings.push({
       type: "high_cardinality",
       severity: "medium",
-      message: "This column has a high proportion of distinct values"
+      message:
+        "This column has a high proportion of distinct values"
     });
   }
 
@@ -358,20 +469,290 @@ const profileColumn = (records, column) => {
     profile.warnings.push({
       type: "whitespace",
       severity: "low",
-      message: `${whitespaceCount} values contain leading or trailing whitespace`
+      message:
+        `${whitespaceCount} values contain leading or trailing whitespace`
     });
   }
 
-  if (profile.numericStats?.outlierCount > 0) {
+  if (outlierDetection.outlierCount > 0) {
     profile.warnings.push({
       type: "outliers",
       severity: "medium",
       message:
-        `${profile.numericStats.outlierCount} possible outliers detected using the IQR method`
+        `${outlierDetection.outlierCount} possible outliers detected using the IQR method`
     });
   }
 
   return profile;
+};
+
+// Calculates dataset-level measurements and readiness estimates.
+const calculateDatasetAssessment = (
+  records,
+  columns,
+  columnProfiles
+) => {
+  const rowCount = records.length;
+  const columnCount = columns.length;
+  const totalCells = rowCount * columnCount;
+
+  let missingCount = 0;
+  let nonMissingCount = 0;
+  let schemaCheckedCount = 0;
+  let schemaValidCount = 0;
+  let whitespaceCount = 0;
+  let outlierCount = 0;
+  let numericObservationCount = 0;
+
+  columnProfiles.forEach((profile) => {
+    missingCount += profile.missingCount;
+    nonMissingCount += profile.nonMissingCount;
+    whitespaceCount += profile.whitespaceCount;
+
+    if (
+      profile.schemaValidation.status === "valid" ||
+      profile.schemaValidation.status === "mismatch"
+    ) {
+      schemaCheckedCount += profile.nonMissingCount;
+      schemaValidCount += profile.schemaValidation.validCount;
+    }
+
+    outlierCount += profile.outlierDetection.outlierCount;
+    numericObservationCount +=
+      profile.outlierDetection.eligibleCount;
+  });
+
+  // Count duplicated complete rows.
+  const rowFrequencies = new Map();
+
+  records.forEach((record) => {
+    const key = JSON.stringify(
+      columns.map((column) => record[column] ?? null)
+    );
+
+    rowFrequencies.set(
+      key,
+      (rowFrequencies.get(key) || 0) + 1
+    );
+  });
+
+  let duplicateRows = 0;
+
+  rowFrequencies.forEach((count) => {
+    if (count > 1) duplicateRows += count - 1;
+  });
+
+  const completeness =
+    totalCells > 0
+      ? (nonMissingCount / totalCells) * 100
+      : null;
+
+  const schemaCompliance =
+    schemaCheckedCount > 0
+      ? (schemaValidCount / schemaCheckedCount) * 100
+      : null;
+
+  const uniqueness =
+    rowCount > 0
+      ? ((rowCount - duplicateRows) / rowCount) * 100
+      : null;
+
+  const consistency =
+    nonMissingCount > 0
+      ? ((nonMissingCount - whitespaceCount) /
+          nonMissingCount) * 100
+      : null;
+
+  const validity =
+    schemaCompliance;
+
+  // Structural integrity is based on measurable structural
+  // indicators, not on whether the dataset is predictive.
+  const structuralIntegrity =
+    columnCount > 0
+      ? (
+          columnProfiles.filter(
+            (profile) =>
+              !profile.isConstant &&
+              profile.inferredType !== "empty"
+          ).length / columnCount
+        ) * 100
+      : null;
+
+  const qualityMetrics = {
+    completeness:
+      completeness === null ? null : Number(completeness.toFixed(2)),
+    validity:
+      validity === null ? null : Number(validity.toFixed(2)),
+    uniqueness:
+      uniqueness === null ? null : Number(uniqueness.toFixed(2)),
+    consistency:
+      consistency === null ? null : Number(consistency.toFixed(2)),
+    schemaCompliance:
+      schemaCompliance === null
+        ? null
+        : Number(schemaCompliance.toFixed(2)),
+    structuralIntegrity:
+      structuralIntegrity === null
+        ? null
+        : Number(structuralIntegrity.toFixed(2))
+  };
+
+  // Quality score uses available assessed dimensions only.
+  // Missing dimensions are not silently treated as 100.
+  const qualityWeights = {
+    completeness: 0.25,
+    validity: 0.20,
+    uniqueness: 0.15,
+    consistency: 0.15,
+    schemaCompliance: 0.15,
+    structuralIntegrity: 0.10
+  };
+
+  let qualityWeightedTotal = 0;
+  let qualityAvailableWeight = 0;
+
+  Object.entries(qualityWeights).forEach(([key, weight]) => {
+    const value = qualityMetrics[key];
+
+    if (value !== null) {
+      qualityWeightedTotal += value * weight;
+      qualityAvailableWeight += weight;
+    }
+  });
+
+  const qualityScore =
+    qualityAvailableWeight > 0
+      ? Number(
+          (qualityWeightedTotal / qualityAvailableWeight).toFixed(2)
+        )
+      : null;
+
+  // ML readiness is an initial heuristic assessment.
+  // Outliers are deliberately not treated as automatic errors.
+  const readinessWeights = {
+    completeness: 0.25,
+    validity: 0.20,
+    uniqueness: 0.15,
+    consistency: 0.15,
+    schemaCompliance: 0.15,
+    structuralIntegrity: 0.10
+  };
+
+  let readinessTotal = 0;
+  let readinessAvailableWeight = 0;
+
+  Object.entries(readinessWeights).forEach(([key, weight]) => {
+    const value = qualityMetrics[key];
+
+    if (value !== null) {
+      readinessTotal += value * weight;
+      readinessAvailableWeight += weight;
+    }
+  });
+
+  const currentReadiness =
+    readinessAvailableWeight > 0
+      ? readinessTotal / readinessAvailableWeight
+      : null;
+
+  // Potential readiness assumes measurable missing values,
+  // schema mismatches, duplicate rows and whitespace issues
+  // can be corrected. It does not assume outliers are errors.
+  const potentialMetrics = {
+    ...qualityMetrics,
+    completeness: completeness === null ? null : 100,
+    validity: validity === null ? null : 100,
+    schemaCompliance:
+      schemaCompliance === null ? null : 100,
+    uniqueness: uniqueness === null ? null : 100,
+    consistency: consistency === null ? null : 100
+  };
+
+  let potentialTotal = 0;
+  let potentialAvailableWeight = 0;
+
+  Object.entries(readinessWeights).forEach(([key, weight]) => {
+    const value = potentialMetrics[key];
+
+    if (value !== null) {
+      potentialTotal += value * weight;
+      potentialAvailableWeight += weight;
+    }
+  });
+
+  const potentialReadiness =
+    potentialAvailableWeight > 0
+      ? Number(
+          (potentialTotal / potentialAvailableWeight).toFixed(2)
+        )
+      : null;
+
+  const outlierPercentage =
+    numericObservationCount > 0
+      ? Number(
+          ((outlierCount / numericObservationCount) * 100).toFixed(2)
+        )
+      : 0;
+
+  const correctionOpportunities = {
+    missingValues: missingCount,
+    schemaMismatches: columnProfiles.reduce(
+      (total, profile) =>
+        total + profile.schemaValidation.mismatchCount,
+      0
+    ),
+    duplicateRows,
+    whitespaceValues: whitespaceCount,
+    outliers: outlierCount
+  };
+
+  return {
+    qualityScore,
+    qualityMetrics,
+
+    outlierSummary: {
+      totalOutliers: outlierCount,
+      numericObservations: numericObservationCount,
+      outlierPercentage,
+      affectedColumns: columnProfiles.filter(
+        (profile) => profile.outlierDetection.outlierCount > 0
+      ).length
+    },
+
+    issueSummary: {
+      missingValues: missingCount,
+      duplicateRows,
+      invalidValues: correctionOpportunities.schemaMismatches,
+      outliers: outlierCount
+    },
+
+    mlReadiness: {
+      score:
+        currentReadiness === null
+          ? null
+          : Number(currentReadiness.toFixed(2)),
+      potentialScore: potentialReadiness,
+      improvementOpportunity:
+        currentReadiness === null || potentialReadiness === null
+          ? null
+          : Number(
+              (potentialReadiness - currentReadiness).toFixed(2)
+            ),
+      level:
+        currentReadiness === null
+          ? null
+          : currentReadiness >= 80
+            ? "high"
+            : currentReadiness >= 60
+              ? "moderate"
+              : "low",
+      warnings: [],
+      scoreType: "heuristic_readiness_not_model_accuracy"
+    },
+
+    correctionOpportunities
+  };
 };
 
 const profileDataset = (records, columns) => {
@@ -379,10 +760,17 @@ const profileDataset = (records, columns) => {
     profileColumn(records, column)
   );
 
+  const assessment = calculateDatasetAssessment(
+    records,
+    columns,
+    columnProfiles
+  );
+
   return {
     rowCount: records.length,
     columnCount: columns.length,
     columns: columnProfiles,
+    ...assessment,
     analysedAt: new Date()
   };
 };
@@ -392,5 +780,11 @@ module.exports = {
   profileColumn,
   detectType,
   classifyValue,
-  validateColumnSchema
+  validateColumnSchema,
+  detectOutliers,
+  calculateNumericStats,
+  calculateDatasetAssessment,
+  isMissing,
+  median,
+  getMode
 };
