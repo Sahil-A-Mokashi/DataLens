@@ -56,6 +56,12 @@ function App() {
 
   const [authLoading, setAuthLoading] = useState(false);
 
+  const [openDataQuery, setOpenDataQuery] = useState("transport");
+  const [openDataResults, setOpenDataResults] = useState([]);
+  const [openDataTotal, setOpenDataTotal] = useState(0);
+  const [openDataLoading, setOpenDataLoading] = useState(false);
+  const [openDataError, setOpenDataError] = useState("");
+
   async function apiRequest(path, options = {}) {
     const headers = {
       ...(options.headers || {})
@@ -312,6 +318,36 @@ function App() {
     }
   }
 
+
+async function searchOpenData(event) {
+  event.preventDefault();
+
+  if (openDataQuery.trim().length < 2) {
+    setOpenDataError("Enter at least 2 characters.");
+    return;
+  }
+
+  setOpenDataLoading(true);
+  setOpenDataError("");
+  setOpenDataResults([]);
+
+  try {
+    const response = await apiRequest(
+      `/api/open-data/search?q=${encodeURIComponent(openDataQuery)}&rows=8`
+    );
+
+    const data = await response.json();
+
+    setOpenDataResults(data.datasets || []);
+    setOpenDataTotal(data.total || 0);
+  } catch (err) {
+    setOpenDataError(err.message);
+  } finally {
+    setOpenDataLoading(false);
+  }
+}
+
+
   const filteredDatasets = useMemo(
     () =>
       datasets.filter(dataset =>
@@ -465,6 +501,9 @@ function App() {
           </a>
           <a className="nav-item" href="#reports">
             <FileCheck2 size={18} /> Reports
+          </a>
+          <a className="nav-item" href="#open-data">
+            <Database size={18} /> Open Data Explorer
           </a>
         </nav>
 
@@ -749,6 +788,120 @@ function App() {
             </div>
           </div>
         </section>
+
+        
+        <section className="panel open-data-panel" id="open-data">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">EXTERNAL API INTEGRATION</p>
+              <h2>Open Data Explorer</h2>
+              <p>Discover public datasets from Ireland's open-data catalogue.</p>
+            </div>
+            <div className="open-data-source">data.gov.ie</div>
+          </div>
+
+          <form className="open-data-search" onSubmit={searchOpenData}>
+            <input
+              type="search"
+              value={openDataQuery}
+              onChange={event => setOpenDataQuery(event.target.value)}
+              placeholder="Search public datasets..."
+              aria-label="Search public datasets"
+            />
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={openDataLoading}
+            >
+              {openDataLoading ? "Searching..." : "Search catalogue"}
+            </button>
+          </form>
+
+          {openDataError && (
+            <div className="error-message">
+              <AlertCircle size={17} /> {openDataError}
+            </div>
+          )}
+
+          {openDataLoading && <p>Searching the Irish open-data catalogue...</p>}
+
+          {!openDataLoading && openDataResults.length > 0 && (
+            <>
+              <p className="open-data-count">
+                Showing {openDataResults.length} results from {openDataTotal.toLocaleString()} matching catalogue records.
+              </p>
+
+              <div className="open-data-results">
+                {openDataResults.map(dataset => (
+                  <article className="open-data-card" key={dataset.id}>
+                    <div className="open-data-card-heading">
+                      <div>
+                        <h3>{dataset.title}</h3>
+                        <span>{dataset.organization}</span>
+                      </div>
+                      <span className="status-pill good">Public dataset</span>
+                    </div>
+
+                    <p className="open-data-description">
+                      {dataset.description || "No description provided by the publisher."}
+                    </p>
+
+                    <div className="open-data-meta">
+                      <span><strong>Licence:</strong> {dataset.license}</span>
+                      <span>
+                        <strong>Modified:</strong>{" "}
+                        {dataset.modified
+                          ? new Date(dataset.modified).toLocaleDateString()
+                          : "Not specified"}
+                      </span>
+                    </div>
+
+                    {dataset.tags?.length > 0 && (
+                      <div className="open-data-tags">
+                        {dataset.tags.slice(0, 5).map(tag => (
+                          <span key={tag}>{tag}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {dataset.resources?.length > 0 && (
+                      <div className="open-data-resources">
+                        <strong>Available resources</strong>
+                        {dataset.resources.slice(0, 4).map(resource => (
+                          <a
+                            key={resource.id}
+                            href={resource.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {resource.name} ({resource.format})
+                            <ArrowUpRight size={14} />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    <a
+                      className="open-data-portal-link"
+                      href={dataset.portalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View dataset on data.gov.ie <ArrowUpRight size={15} />
+                    </a>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {!openDataLoading && openDataResults.length === 0 && !openDataError && (
+            <p className="open-data-empty">
+              Search for transport, housing, population or other public datasets.
+            </p>
+          )}
+        </section>
+
 
         {selectedDataset && (
           <section className="panel cleaning-panel">

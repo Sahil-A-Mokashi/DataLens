@@ -463,3 +463,159 @@ tbody tr:last-child td { border-bottom: 0; }
 .version-history .status-pill {
   margin-left: 8px;
 }
+
+
+
+.open-data-panel {
+  margin-top: 24px;
+  padding: 24px;
+}
+
+.open-data-source {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #eef3ff;
+  color: #405fc0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.open-data-search {
+  display: flex;
+  gap: 12px;
+  margin: 22px 0;
+}
+
+.open-data-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #dce1e9;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.open-data-count {
+  margin: 14px 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.open-data-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.open-data-card {
+  padding: 18px;
+  border: 1px solid #e7eaf0;
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.open-data-card-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.open-data-card-heading h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.open-data-card-heading > div > span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.open-data-card-heading .status-pill {
+  flex-shrink: 0;
+}
+
+.open-data-description {
+  margin: 14px 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.open-data-meta {
+  display: grid;
+  gap: 7px;
+  color: #667085;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.open-data-meta strong {
+  color: #344054;
+}
+
+.open-data-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0;
+}
+
+.open-data-tags span {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 11px;
+}
+
+.open-data-resources {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  font-size: 12px;
+}
+
+.open-data-resources a,
+.open-data-portal-link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: #4565ca;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.open-data-resources a:hover,
+.open-data-portal-link:hover {
+  text-decoration: underline;
+}
+
+.open-data-portal-link {
+  justify-content: flex-start;
+  margin-top: 18px;
+  padding-top: 13px;
+  border-top: 1px solid #edf0f4;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.open-data-empty {
+  padding: 25px;
+  text-align: center;
+  color: #667085;
+  font-size: 13px;
+}
+
+@media (max-width: 800px) {
+  .open-data-results {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 550px) {
+  .open-data-search {
+    flex-direction: column;
+  }
+}

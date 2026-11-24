@@ -8,6 +8,7 @@ const rateLimit = require("express-rate-limit");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const datasetRoutes = require("./routes/datasetRoutes");
+const openDataRoutes = require("./routes/openDataRoutes");
 const app = express();
 
 
@@ -22,6 +23,7 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/datasets", datasetRoutes);
+app.use("/api/open-data", openDataRoutes);
 
 app.use(
   rateLimit({
