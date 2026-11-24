@@ -1,5 +1,5 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -18,113 +18,409 @@ import {
   Upload,
   Users,
   X,
+  RefreshCw,
+  Download,
+  Sparkles
 } from "lucide-react";
-import Papa from "papaparse";
 import "./App.css";
 
-const sampleData = [
-  { id: 1, name: "Customer Records", rows: 1250, issues: 34, score: 97.3, status: "Good" },
-  { id: 2, name: "Product Inventory", rows: 840, issues: 126, score: 85.0, status: "Needs review" },
-  { id: 3, name: "Sales Transactions", rows: 3200, issues: 18, score: 99.4, status: "Excellent" },
-];
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 function App() {
-  const [datasets, setDatasets] = useState(sampleData);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [csvData, setCsvData] = useState([]);
+  const [token, setToken] = useState(
+    () => sessionStorage.getItem("datalens_token") || ""
+  );
+  const [user, setUser] = useState(
+    () => JSON.parse(sessionStorage.getItem("datalens_user") || "null")
+  );
+
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState({
+    name: "",
+    email: "",
+    password: ""
+  });
+
+  const [datasets, setDatasets] = useState([]);
+  const [selectedDataset, setSelectedDataset] = useState(null);
+  const [cleaningPreview, setCleaningPreview] = useState(null);
+  const [replacement, setReplacement] = useState("Not provided");
+
   const [searchTerm, setSearchTerm] = useState("");
-  const [uploadError, setUploadError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const [authLoading, setAuthLoading] = useState(false);
+
+  async function apiRequest(path, options = {}) {
+    const headers = {
+      ...(options.headers || {})
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers
+    });
+
+    const contentType = response.headers.get("content-type") || "";
+
+    if (!response.ok) {
+      let errorMessage = "Something went wrong";
+
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        errorMessage = data.message || errorMessage;
+      } else {
+        errorMessage = await response.text();
+      }
+
+      throw new Error(errorMessage);
+    }
+
+    return response;
+  }
+
+  async function loadDatasets() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await apiRequest("/api/datasets");
+      const data = await response.json();
+
+      setDatasets(data.datasets || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (token) {
+      loadDatasets();
+    }
+  }, [token]);
+
+  async function handleAuth(event) {
+    event.preventDefault();
+    setAuthLoading(true);
+    setError("");
+
+    try {
+      const endpoint =
+        authMode === "login" ? "/api/auth/login" : "/api/auth/register";
+
+      const body =
+        authMode === "login"
+          ? {
+              email: authForm.email,
+              password: authForm.password
+            }
+          : authForm;
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "Authentication failed");
+      }
+
+      sessionStorage.setItem("datalens_token", data.token);
+      sessionStorage.setItem("datalens_user", JSON.stringify(data.user));
+
+      setToken(data.token);
+      setUser(data.user);
+      setAuthForm({ name: "", email: "", password: "" });
+      setMessage("Welcome to DataLens.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem("datalens_token");
+    sessionStorage.removeItem("datalens_user");
+
+    setToken("");
+    setUser(null);
+    setDatasets([]);
+    setSelectedDataset(null);
+    setCleaningPreview(null);
+    setMessage("");
+    setError("");
+  }
+
+  async function handleFileUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    setError("");
+    setMessage("");
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setError("Please select a CSV file.");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError("File size must be 2 MB or less.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setUploading(true);
+
+    try {
+      const response = await apiRequest("/api/datasets/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await response.json();
+
+      setMessage(data.message || "Dataset uploaded successfully.");
+      await loadDatasets();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function openCleaningPreview(dataset) {
+    setSelectedDataset(dataset);
+    setCleaningPreview(null);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await apiRequest(
+        `/api/datasets/${dataset._id}/cleaning-preview`
+      );
+
+      const data = await response.json();
+      setCleaningPreview(data.preview);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function applyCleaning() {
+    if (!selectedDataset) return;
+
+    setCleaning(true);
+    setError("");
+    setMessage("");
+
+    try {
+      const response = await apiRequest(
+        `/api/datasets/${selectedDataset._id}/clean`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            missingValueReplacement: replacement
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      setMessage(
+        `Cleaning complete. Version ${data.version.versionNumber} created.`
+      );
+
+      setCleaningPreview(null);
+      await loadDatasets();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  async function exportDataset(dataset, version) {
+    try {
+      setError("");
+
+      const query = version ? `?version=${version}` : "";
+      const response = await apiRequest(
+        `/api/datasets/${dataset._id}/export${query}`
+      );
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = version
+        ? `${dataset.name}-version-${version}.csv`
+        : `${dataset.name}-original.csv`;
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+
+      setMessage("CSV download started.");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   const filteredDatasets = useMemo(
     () =>
-      datasets.filter((dataset) =>
+      datasets.filter(dataset =>
         dataset.name.toLowerCase().includes(searchTerm.toLowerCase())
       ),
     [datasets, searchTerm]
   );
 
-  const totalRows = datasets.reduce((sum, item) => sum + item.rows, 0);
-  const totalIssues = datasets.reduce((sum, item) => sum + item.issues, 0);
+  const totalRows = datasets.reduce(
+    (sum, item) => sum + (item.rowCount || 0),
+    0
+  );
+
+  const totalIssues = datasets.reduce(
+    (sum, item) =>
+      sum +
+      (item.issueSummary?.missingValues || 0) +
+      (item.issueSummary?.duplicateRows || 0) +
+      (item.issueSummary?.invalidValues || 0),
+    0
+  );
+
   const averageScore = datasets.length
     ? (
-        datasets.reduce((sum, item) => sum + item.score, 0) / datasets.length
+        datasets.reduce(
+          (sum, item) => sum + (item.qualityScore || 0),
+          0
+        ) / datasets.length
       ).toFixed(1)
     : "0.0";
 
-  function handleFileUpload(event) {
-    const file = event.target.files?.[0];
-    setUploadError("");
-    setSelectedFile(null);
-    setCsvData([]);
+  const highQualityCount = datasets.filter(
+    dataset => dataset.qualityScore >= 95
+  ).length;
 
-    if (!file) return;
-
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setUploadError("Please select a CSV file.");
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError("File size must be 5 MB or less.");
-      return;
-    }
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (!results.data.length || !results.meta.fields?.length) {
-          setUploadError("The CSV file appears to be empty or invalid.");
-          return;
-        }
-
-        setSelectedFile(file);
-        setCsvData(results.data);
-      },
-      error: () => setUploadError("Unable to read this CSV file."),
-    });
-
-    event.target.value = "";
+  function getStatus(score) {
+    if (score >= 95) return "Excellent";
+    if (score >= 85) return "Good";
+    return "Needs review";
   }
 
-  function addDataset() {
-    if (!selectedFile || !csvData.length) return;
+  if (!token) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <div className="brand auth-brand">
+            <div className="brand-icon"><Activity size={22} /></div>
+            <span>Data<span className="brand-light">Lens</span></span>
+          </div>
 
-    const columns = Object.keys(csvData[0]);
-    let missingCells = 0;
-    const seenRows = new Set();
-    let duplicateRows = 0;
+          <p className="eyebrow">DATA QUALITY PLATFORM</p>
+          <h1>{authMode === "login" ? "Welcome back" : "Create your account"}</h1>
+          <p className="subtitle">
+            {authMode === "login"
+              ? "Sign in to manage and assess your datasets."
+              : "Register to start analysing your data."}
+          </p>
 
-    csvData.forEach((row) => {
-      columns.forEach((column) => {
-        if (row[column] === null || String(row[column]).trim() === "") {
-          missingCells += 1;
-        }
-      });
+          {error && <div className="error-message">{error}</div>}
 
-      const rowKey = JSON.stringify(row);
-      if (seenRows.has(rowKey)) duplicateRows += 1;
-      seenRows.add(rowKey);
-    });
+          <form onSubmit={handleAuth} className="auth-form">
+            {authMode === "register" && (
+              <label>
+                Full name
+                <input
+                  required
+                  minLength={2}
+                  value={authForm.name}
+                  onChange={e =>
+                    setAuthForm({ ...authForm, name: e.target.value })
+                  }
+                  placeholder="Your name"
+                />
+              </label>
+            )}
 
-    const issueCount = missingCells + duplicateRows;
-    const totalCells = csvData.length * columns.length;
-    const score = totalCells
-      ? Math.max(0, 100 - (issueCount / totalCells) * 100)
-      : 100;
+            <label>
+              Email address
+              <input
+                type="email"
+                required
+                value={authForm.email}
+                onChange={e =>
+                  setAuthForm({ ...authForm, email: e.target.value })
+                }
+                placeholder="you@example.com"
+              />
+            </label>
 
-    const newDataset = {
-      id: Date.now(),
-      name: selectedFile.name.replace(/\.csv$/i, ""),
-      rows: csvData.length,
-      issues: issueCount,
-      score: Number(score.toFixed(1)),
-      status: score >= 95 ? "Excellent" : score >= 85 ? "Good" : "Needs review",
-    };
+            <label>
+              Password
+              <input
+                type="password"
+                required
+                minLength={8}
+                value={authForm.password}
+                onChange={e =>
+                  setAuthForm({ ...authForm, password: e.target.value })
+                }
+                placeholder="At least 8 characters"
+              />
+            </label>
 
-    setDatasets((current) => [newDataset, ...current]);
-    setSelectedFile(null);
-    setCsvData([]);
+            <button className="primary-button auth-submit" disabled={authLoading}>
+              {authLoading
+                ? "Please wait..."
+                : authMode === "login"
+                  ? "Sign in"
+                  : "Create account"}
+            </button>
+          </form>
+
+          <p className="auth-switch">
+            {authMode === "login"
+              ? "Don't have an account?"
+              : "Already have an account?"}
+            {" "}
+            <button
+              className="text-button"
+              onClick={() => {
+                setAuthMode(authMode === "login" ? "register" : "login");
+                setError("");
+              }}
+            >
+              {authMode === "login" ? "Register" : "Sign in"}
+            </button>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -137,22 +433,43 @@ function App() {
 
         <div className="workspace-label">WORKSPACE</div>
         <nav className="navigation">
-          <a className="nav-item active" href="#dashboard"><LayoutDashboard size={18} /> Dashboard</a>
-          <a className="nav-item" href="#datasets"><Database size={18} /> Datasets</a>
-          <a className="nav-item" href="#quality"><ShieldCheck size={18} /> Quality checks</a>
-          <a className="nav-item" href="#reports"><FileCheck2 size={18} /> Reports</a>
+          <a className="nav-item active" href="#dashboard">
+            <LayoutDashboard size={18} /> Dashboard
+          </a>
+          <a className="nav-item" href="#datasets">
+            <Database size={18} /> Datasets
+          </a>
+          <a className="nav-item" href="#quality">
+            <ShieldCheck size={18} /> Quality checks
+          </a>
+          <a className="nav-item" href="#reports">
+            <FileCheck2 size={18} /> Reports
+          </a>
         </nav>
 
         <div className="sidebar-bottom">
-          <a className="nav-item" href="#settings"><Settings size={18} /> Settings</a>
-          <a className="nav-item" href="#help"><CircleHelp size={18} /> Help & support</a>
+          <a className="nav-item" href="#settings">
+            <Settings size={18} /> Settings
+          </a>
+          <a className="nav-item" href="#help">
+            <CircleHelp size={18} /> Help & support
+          </a>
           <div className="profile">
-            <div className="avatar">SM</div>
-            <div className="profile-info">
-              <strong>Workspace user</strong>
-              <span>Data analyst</span>
+            <div className="avatar">
+              {(user?.name || "U").slice(0, 1).toUpperCase()}
             </div>
-            <LogOut size={17} className="logout-icon" />
+            <div className="profile-info">
+              <strong>{user?.name || "Workspace user"}</strong>
+              <span>{user?.email || "Data analyst"}</span>
+            </div>
+            <button
+              className="icon-button"
+              onClick={logout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={17} />
+            </button>
           </div>
         </div>
       </aside>
@@ -161,8 +478,12 @@ function App() {
         <header className="topbar">
           <div className="breadcrumb">Workspace <span>/</span> Overview</div>
           <div className="topbar-right">
-            <span className="system-status"><span className="status-dot" /> System operational</span>
-            <div className="avatar small">SM</div>
+            <span className="system-status">
+              <span className="status-dot" /> API connected
+            </span>
+            <div className="avatar small">
+              {(user?.name || "U").slice(0, 1).toUpperCase()}
+            </div>
           </div>
         </header>
 
@@ -170,35 +491,64 @@ function App() {
           <div>
             <p className="eyebrow">DATA QUALITY PLATFORM</p>
             <h1>Dashboard</h1>
-            <p className="subtitle">Monitor, assess and improve the quality of your datasets.</p>
+            <p className="subtitle">
+              Monitor, assess and improve the quality of your datasets.
+            </p>
           </div>
+
           <label className="primary-button upload-button">
-            <Upload size={17} /> Upload dataset
-            <input type="file" accept=".csv,text/csv" onChange={handleFileUpload} hidden />
+            <Upload size={17} />
+            {uploading ? "Uploading..." : "Upload dataset"}
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleFileUpload}
+              disabled={uploading}
+              hidden
+            />
           </label>
         </section>
 
-        {uploadError && (
-          <div className="error-message"><AlertCircle size={17} /> {uploadError}</div>
+        {error && (
+          <div className="error-message">
+            <AlertCircle size={17} /> {error}
+          </div>
         )}
 
-        {selectedFile && (
-          <section className="upload-preview">
-            <div className="upload-file-icon"><FileSpreadsheet size={22} /></div>
-            <div className="upload-file-info">
-              <strong>{selectedFile.name}</strong>
-              <span>{csvData.length.toLocaleString()} rows detected · {Object.keys(csvData[0] || {}).length} columns</span>
-            </div>
-            <button className="primary-button" onClick={addDataset}>Add dataset</button>
-            <button className="icon-button" onClick={() => { setSelectedFile(null); setCsvData([]); }} aria-label="Cancel upload"><X size={18} /></button>
-          </section>
+        {message && (
+          <div className="success-message">
+            <CheckCircle2 size={17} /> {message}
+            <button onClick={() => setMessage("")} aria-label="Dismiss">
+              <X size={16} />
+            </button>
+          </div>
         )}
 
         <section className="metrics-grid">
-          <MetricCard title="Total datasets" value={datasets.length} note="Datasets in workspace" icon={<Database />} />
-          <MetricCard title="Records analysed" value={totalRows.toLocaleString()} note="Across all datasets" icon={<FileSpreadsheet />} />
-          <MetricCard title="Quality issues" value={totalIssues.toLocaleString()} note="Detected by current checks" icon={<AlertCircle />} />
-          <MetricCard title="Average quality score" value={`${averageScore}%`} note="Across all datasets" icon={<ShieldCheck />} />
+          <MetricCard
+            title="Total datasets"
+            value={datasets.length}
+            note="Your uploaded datasets"
+            icon={<Database />}
+          />
+          <MetricCard
+            title="Records analysed"
+            value={totalRows.toLocaleString()}
+            note="Across all datasets"
+            icon={<FileSpreadsheet />}
+          />
+          <MetricCard
+            title="Quality issues"
+            value={totalIssues.toLocaleString()}
+            note="Missing, duplicate and invalid values"
+            icon={<AlertCircle />}
+          />
+          <MetricCard
+            title="Average quality score"
+            value={`${averageScore}%`}
+            note="Average across your datasets"
+            icon={<ShieldCheck />}
+          />
         </section>
 
         <section className="content-grid">
@@ -208,14 +558,16 @@ function App() {
                 <h2>Recent datasets</h2>
                 <p>Review the quality of your uploaded data.</p>
               </div>
-              <button className="text-button">View all <ArrowUpRight size={15} /></button>
+              <button className="text-button" onClick={loadDatasets}>
+                Refresh <RefreshCw size={15} />
+              </button>
             </div>
 
             <div className="search-box">
               <Search size={17} />
               <input
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={event => setSearchTerm(event.target.value)}
                 placeholder="Search datasets..."
               />
             </div>
@@ -229,25 +581,84 @@ function App() {
                     <th>ISSUES</th>
                     <th>QUALITY SCORE</th>
                     <th>STATUS</th>
+                    <th>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredDatasets.map((dataset) => (
-                    <tr key={dataset.id}>
-                      <td><div className="dataset-name"><div className="table-file-icon"><FileSpreadsheet size={17} /></div><strong>{dataset.name}</strong></div></td>
-                      <td>{dataset.rows.toLocaleString()}</td>
-                      <td><span className={dataset.issues ? "issue-count" : "clean-count"}>{dataset.issues}</span></td>
-                      <td>
-                        <div className="score-cell">
-                          <div className="score-track"><div className="score-fill" style={{ width: `${dataset.score}%` }} /></div>
-                          <strong>{dataset.score}%</strong>
-                        </div>
-                      </td>
-                      <td><span className={`status-pill ${dataset.status === "Excellent" ? "excellent" : dataset.status === "Good" ? "good" : "review"}`}>{dataset.status}</span></td>
+                  {loading && (
+                    <tr>
+                      <td colSpan="6" className="empty-state">Loading datasets...</td>
                     </tr>
-                  ))}
-                  {filteredDatasets.length === 0 && (
-                    <tr><td colSpan="5" className="empty-state">No datasets match your search.</td></tr>
+                  )}
+
+                  {!loading && filteredDatasets.map(dataset => {
+                    const issues =
+                      (dataset.issueSummary?.missingValues || 0) +
+                      (dataset.issueSummary?.duplicateRows || 0) +
+                      (dataset.issueSummary?.invalidValues || 0);
+
+                    const status = getStatus(dataset.qualityScore || 0);
+
+                    return (
+                      <tr key={dataset._id}>
+                        <td>
+                          <div className="dataset-name">
+                            <div className="table-file-icon">
+                              <FileSpreadsheet size={17} />
+                            </div>
+                            <strong>{dataset.name}</strong>
+                          </div>
+                        </td>
+                        <td>{(dataset.rowCount || 0).toLocaleString()}</td>
+                        <td>
+                          <span className={issues ? "issue-count" : "clean-count"}>
+                            {issues}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="score-cell">
+                            <div className="score-track">
+                              <div
+                                className="score-fill"
+                                style={{
+                                  width: `${dataset.qualityScore || 0}%`
+                                }}
+                              />
+                            </div>
+                            <strong>{dataset.qualityScore || 0}%</strong>
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              status === "Excellent"
+                                ? "excellent"
+                                : status === "Good"
+                                  ? "good"
+                                  : "review"
+                            }`}
+                          >
+                            {status}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="text-button"
+                            onClick={() => openCleaningPreview(dataset)}
+                          >
+                            Review
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {!loading && filteredDatasets.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="empty-state">
+                        No datasets found. Upload a CSV to get started.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
@@ -257,15 +668,20 @@ function App() {
           <div className="right-column">
             <div className="panel overview-panel" id="quality">
               <div className="panel-heading">
-                <div><h2>Quality overview</h2><p>Workspace health at a glance.</p></div>
+                <div>
+                  <h2>Quality overview</h2>
+                  <p>Workspace health at a glance.</p>
+                </div>
                 <ChevronDown size={17} className="muted-icon" />
               </div>
+
               <div className="quality-ring" style={{ "--score": `${averageScore}%` }}>
                 <div className="ring-inner">
                   <strong>{averageScore}%</strong>
                   <span>Average score</span>
                 </div>
               </div>
+
               <div className="overview-footer">
                 <span><span className="legend-dot" /> Overall dataset quality</span>
                 <strong>{datasets.length} datasets</strong>
@@ -274,23 +690,140 @@ function App() {
 
             <div className="panel activity-panel">
               <div className="panel-heading">
-                <div><h2>Quick insights</h2><p>Current workspace summary.</p></div>
+                <div>
+                  <h2>Quick insights</h2>
+                  <p>Current workspace summary.</p>
+                </div>
               </div>
+
               <div className="insight-row">
-                <div className="insight-icon warning"><AlertCircle size={18} /></div>
-                <div><strong>{totalIssues} quality issues</strong><span>Across your datasets</span></div>
+                <div className="insight-icon warning">
+                  <AlertCircle size={18} />
+                </div>
+                <div>
+                  <strong>{totalIssues} quality issues</strong>
+                  <span>Across your datasets</span>
+                </div>
               </div>
+
               <div className="insight-row">
-                <div className="insight-icon success"><CheckCircle2 size={18} /></div>
-                <div><strong>{datasets.filter((d) => d.score >= 95).length} high-quality datasets</strong><span>Scoring 95% or above</span></div>
+                <div className="insight-icon success">
+                  <CheckCircle2 size={18} />
+                </div>
+                <div>
+                  <strong>{highQualityCount} high-quality datasets</strong>
+                  <span>Scoring 95% or above</span>
+                </div>
               </div>
+
               <div className="insight-row">
-                <div className="insight-icon neutral"><Users size={18} /></div>
-                <div><strong>Workspace overview</strong><span>Single-user demo workspace</span></div>
+                <div className="insight-icon neutral">
+                  <Users size={18} />
+                </div>
+                <div>
+                  <strong>{user?.name || "Workspace user"}</strong>
+                  <span>Authenticated workspace</span>
+                </div>
               </div>
             </div>
           </div>
         </section>
+
+        {selectedDataset && (
+          <section className="panel cleaning-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">DATASET REVIEW</p>
+                <h2>{selectedDataset.name}</h2>
+                <p>Preview detected issues and apply cleaning.</p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={() => {
+                  setSelectedDataset(null);
+                  setCleaningPreview(null);
+                }}
+                aria-label="Close dataset review"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="export-actions">
+              <button
+                className="secondary-button"
+                onClick={() => exportDataset(selectedDataset)}
+              >
+                <Download size={16} /> Download original
+              </button>
+              <button
+                className="secondary-button"
+                onClick={() => exportDataset(selectedDataset, 2)}
+              >
+                <Download size={16} /> Download Version 2
+              </button>
+            </div>
+
+            {cleaningPreview ? (
+              <>
+                <div className="preview-stats">
+                  <div>
+                    <span>Rows</span>
+                    <strong>{cleaningPreview.totalRows}</strong>
+                  </div>
+                  <div>
+                    <span>Missing values</span>
+                    <strong>{cleaningPreview.missingValuesFound}</strong>
+                  </div>
+                  <div>
+                    <span>Exact duplicate rows</span>
+                    <strong>{cleaningPreview.duplicateRowsFound}</strong>
+                  </div>
+                </div>
+
+                <h3>Detected missing cells</h3>
+                {cleaningPreview.missingCells.length ? (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th>ROW</th><th>COLUMN</th></tr>
+                      </thead>
+                      <tbody>
+                        {cleaningPreview.missingCells.map((cell, index) => (
+                          <tr key={`${cell.row}-${cell.column}-${index}`}>
+                            <td>{cell.row}</td>
+                            <td>{cell.column}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p>No missing cells detected.</p>
+                )}
+
+                <label className="replacement-field">
+                  Replacement value for missing cells
+                  <input
+                    value={replacement}
+                    onChange={event => setReplacement(event.target.value)}
+                  />
+                </label>
+
+                <button
+                  className="primary-button"
+                  onClick={applyCleaning}
+                  disabled={cleaning || !replacement.trim()}
+                >
+                  <Sparkles size={16} />
+                  {cleaning ? "Applying..." : "Apply cleaning and create new version"}
+                </button>
+              </>
+            ) : (
+              <p>Loading cleaning preview...</p>
+            )}
+          </section>
+        )}
 
         <footer className="footer">
           <span>DataLens · Data Quality Assessment Platform</span>
