@@ -227,6 +227,13 @@ const validateStrategyColumns = (strategies, columns, allowedMethods) => {
     }
 
     validateStrategy(strategy, column, allowedMethods);
+    if (
+        allowedMethods.includes("drop_rows") &&
+        strategy.expectedType !== undefined &&
+        !["numeric", "categorical", "boolean", "date"].includes(strategy.expectedType)
+        ) {
+        throw new Error(`Invalid expectedType for column "${column}"`);
+        }
   }
 };
 
@@ -480,6 +487,18 @@ const applyCleaning = async (req, res) => {
         columns,
         treatmentMethods
       );
+
+      for (const [column, strategy] of Object.entries(invalidStrategies)) {
+        if (
+            !["numeric", "categorical", "boolean", "date"].includes(
+            strategy.expectedType
+            )
+        ) {
+            throw new Error(
+            `Provide a valid expectedType for invalid values in "${column}"`
+            );
+        }
+        }
 
       validateStrategyColumns(
         outlierStrategies,
@@ -746,18 +765,15 @@ const applyCleaning = async (req, res) => {
 
     const previousQualityScore = dataset.qualityScore;
     const previousMlReadinessScore =
-      dataset.mlReadiness?.score ?? null;
+    dataset.mlReadiness?.score ?? null;
+
+    // Preserve the pre-cleaning state before modifying the dataset.
+    await createOriginalVersionIfMissing(dataset);
 
     const profiling = applyProfilingToDataset(
-      dataset,
-      processedRecords
+    dataset,
+    processedRecords
     );
-
-    // ------------------------------------------------
-    // CREATE VERSION SNAPSHOT
-    // ------------------------------------------------
-
-    await createOriginalVersionIfMissing(dataset);
 
     const strategySummary = [
       ...Object.entries(columnStrategies).map(([column, strategy]) => ({

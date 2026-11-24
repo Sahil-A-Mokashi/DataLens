@@ -47,6 +47,12 @@ function App() {
   const [versions, setVersions] = useState([]);
   const [selectedVersion, setSelectedVersion] = useState(null);
 const [columnStrategies, setColumnStrategies] = useState({});
+const [invalidStrategies, setInvalidStrategies] = useState({});
+const [outlierStrategies, setOutlierStrategies] = useState({});
+const [schemaSectionOpen, setSchemaSectionOpen] = useState(true);
+const [missingSectionOpen, setMissingSectionOpen] = useState(true);
+const [invalidSectionOpen, setInvalidSectionOpen] = useState(true);
+const [outlierSectionOpen, setOutlierSectionOpen] = useState(true);
 
 const [schemaSelections, setSchemaSelections] = useState({});
 const [schemaResults, setSchemaResults] = useState({});
@@ -272,7 +278,33 @@ useEffect(() => {
 
 
       setColumnStrategies(initialStrategies);
-      setVersions(versionsData.versions || []);
+
+      const sortedVersions = [...(versionsData.versions || [])].sort(
+        (a, b) => b.versionNumber - a.versionNumber
+      );
+      setVersions(sortedVersions);
+      setSelectedVersion(sortedVersions[0] || null);
+
+      const initialInvalidStrategies = {};
+      (previewData.preview.schemaColumns || []).forEach(item => {
+        initialInvalidStrategies[item.column] = {
+          method: "keep",
+          expectedType: ["numeric", "categorical", "boolean", "date"].includes(item.inferredType)
+            ? item.inferredType
+            : "",
+          value: ""
+        };
+      });
+      setInvalidStrategies(initialInvalidStrategies);
+
+      const initialOutlierStrategies = {};
+      (previewData.preview.outlierColumns || []).forEach(item => {
+        initialOutlierStrategies[item.column] = {
+          method: "keep",
+          value: ""
+        };
+      });
+      setOutlierStrategies(initialOutlierStrategies);
     } catch (err) {
       setError(err.message);
     }
@@ -354,8 +386,11 @@ async function validateSchema(column) {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-          columnStrategies
-        })
+            columnStrategies,
+            invalidStrategies,
+            outlierStrategies,
+            removeDuplicates: true
+          })
         }
       );
 
@@ -372,7 +407,11 @@ async function validateSchema(column) {
       );
       const versionsData = await versionsResponse.json();
 
-      setVersions(versionsData.versions || []);
+      const sortedVersions = [...(versionsData.versions || [])].sort(
+        (a, b) => b.versionNumber - a.versionNumber
+      );
+      setVersions(sortedVersions);
+      setSelectedVersion(sortedVersions[0] || null);
 
       const previewResponse = await apiRequest(
         `/api/datasets/${selectedDataset._id}/cleaning-preview`
@@ -477,39 +516,12 @@ async function searchOpenData(event) {
       ).toFixed(1)
     : "0.0";
 
-  const datasetProfiles = selectedDataset?.profile || [];
-
-const profileTotals = datasetProfiles.reduce(
-  (totals, item) => ({
-    total: totals.total + (item.totalCount || 0),
-    nonMissing: totals.nonMissing + (item.nonMissingCount || 0),
-    duplicates: totals.duplicates + (item.duplicateValueCount || 0),
-    valid: totals.valid + (
-      ["valid", "mismatch"].includes(item.schemaValidation?.status)
-        ? item.schemaValidation.validCount || 0
-        : 0
-    ),
-    checked: totals.checked + (
-      ["valid", "mismatch"].includes(item.schemaValidation?.status)
-        ? (item.schemaValidation.validCount || 0) +
-          (item.schemaValidation.mismatchCount || 0)
-        : 0
-    )
-  }),
-  { total: 0, nonMissing: 0, duplicates: 0, valid: 0, checked: 0 }
-);
-
-const datasetMetrics = {
-  completeness: profileTotals.total
-    ? Math.round(profileTotals.nonMissing / profileTotals.total * 100)
-    : 0,
-  uniqueness: profileTotals.nonMissing
-    ? Math.round((1 - profileTotals.duplicates / profileTotals.nonMissing) * 100)
-    : 0,
-  schemaValidity: profileTotals.checked
-    ? Math.round(profileTotals.valid / profileTotals.checked * 100)
-    : null
-};
+  const savedMetrics = selectedDataset?.qualityMetrics || {};
+  const datasetMetrics = {
+    completeness: typeof savedMetrics.completeness === "number" ? savedMetrics.completeness : null,
+    uniqueness: typeof savedMetrics.uniqueness === "number" ? savedMetrics.uniqueness : null,
+    schemaValidity: typeof savedMetrics.schemaCompliance === "number" ? savedMetrics.schemaCompliance : null
+  };
 
   const highQualityCount = datasets.filter(
     dataset => dataset.qualityScore >= 95
@@ -928,117 +940,7 @@ const datasetMetrics = {
         </section>
 
         
-        <section className="panel open-data-panel" id="open-data">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">EXTERNAL API INTEGRATION</p>
-              <h2>Open Data Explorer</h2>
-              <p>Discover public datasets from Ireland's open-data catalogue.</p>
-            </div>
-            <div className="open-data-source">data.gov.ie</div>
-          </div>
 
-          <form className="open-data-search" onSubmit={searchOpenData}>
-            <input
-              type="search"
-              value={openDataQuery}
-              onChange={event => setOpenDataQuery(event.target.value)}
-              placeholder="Search public datasets..."
-              aria-label="Search public datasets"
-            />
-            <button
-              className="primary-button"
-              type="submit"
-              disabled={openDataLoading}
-            >
-              {openDataLoading ? "Searching..." : "Search catalogue"}
-            </button>
-          </form>
-
-          {openDataError && (
-            <div className="error-message">
-              <AlertCircle size={17} /> {openDataError}
-            </div>
-          )}
-
-          {openDataLoading && <p>Searching the Irish open-data catalogue...</p>}
-
-          {!openDataLoading && openDataResults.length > 0 && (
-            <>
-              <p className="open-data-count">
-                Showing {openDataResults.length} results from {openDataTotal.toLocaleString()} matching catalogue records.
-              </p>
-
-              <div className="open-data-results">
-                {openDataResults.map(dataset => (
-                  <article className="open-data-card" key={dataset.id}>
-                    <div className="open-data-card-heading">
-                      <div>
-                        <h3>{dataset.title}</h3>
-                        <span>{dataset.organization}</span>
-                      </div>
-                      <span className="status-pill good">Public dataset</span>
-                    </div>
-
-                    <p className="open-data-description">
-                      {dataset.description || "No description provided by the publisher."}
-                    </p>
-
-                    <div className="open-data-meta">
-                      <span><strong>Licence:</strong> {dataset.license}</span>
-                      <span>
-                        <strong>Modified:</strong>{" "}
-                        {dataset.modified
-                          ? new Date(dataset.modified).toLocaleDateString()
-                          : "Not specified"}
-                      </span>
-                    </div>
-
-                    {dataset.tags?.length > 0 && (
-                      <div className="open-data-tags">
-                        {dataset.tags.slice(0, 5).map(tag => (
-                          <span key={tag}>{tag}</span>
-                        ))}
-                      </div>
-                    )}
-
-                    {dataset.resources?.length > 0 && (
-                      <div className="open-data-resources">
-                        <strong>Available resources</strong>
-                        {dataset.resources.slice(0, 4).map(resource => (
-                          <a
-                            key={resource.id}
-                            href={resource.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            {resource.name} ({resource.format})
-                            <ArrowUpRight size={14} />
-                          </a>
-                        ))}
-                      </div>
-                    )}
-
-                    <a
-                      className="open-data-portal-link"
-                      href={dataset.portalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      View dataset on data.gov.ie <ArrowUpRight size={15} />
-                    </a>
-                  </article>
-                ))}
-              </div>
-            </>
-          )}
-
-          {!openDataLoading && openDataResults.length === 0 && !openDataError && (
-            <p className="open-data-empty">
-              Search for transport, housing, population or other public datasets.
-            </p>
-          )}
-        </section>
 
 
         {selectedDataset && (
@@ -1057,6 +959,7 @@ const datasetMetrics = {
                 onClick={() => {
                   setSelectedDataset(null);
                   setCleaningPreview(null);
+                  setSelectedVersion(null);
                 }}
                 aria-label="Close dataset review"
               >
@@ -1096,7 +999,7 @@ const datasetMetrics = {
       <p>Measured quality indicators for this dataset.</p>
     </div>
     <div className="dataset-health-score">
-      <strong>{selectedDataset.qualityScore ?? 0}%</strong>
+      <strong>{selectedDataset.qualityScore == null ? "Not assessed" : `${Number(selectedDataset.qualityScore).toFixed(2)}%`}</strong>
       <span>Overall quality</span>
     </div>
   </div>
@@ -1104,32 +1007,37 @@ const datasetMetrics = {
   <div className="dataset-health-grid">
     <div className="dataset-health-card">
       <span>Completeness</span>
-      <strong>{datasetMetrics.completeness}%</strong>
+      <strong>{datasetMetrics.completeness == null ? "Not assessed" : `${datasetMetrics.completeness.toFixed(2)}%`}</strong>
       <div className="health-track">
-        <div style={{ width: `${datasetMetrics.completeness}%` }} />
+        <div style={{ width: `${datasetMetrics.completeness ?? 0}%` }} />
       </div>
     </div>
 
     <div className="dataset-health-card">
       <span>Uniqueness</span>
-      <strong>{datasetMetrics.uniqueness}%</strong>
+      <strong>{datasetMetrics.uniqueness == null ? "Not assessed" : `${datasetMetrics.uniqueness.toFixed(2)}%`}</strong>
       <div className="health-track">
-        <div style={{ width: `${datasetMetrics.uniqueness}%` }} />
+        <div style={{ width: `${datasetMetrics.uniqueness ?? 0}%` }} />
       </div>
     </div>
 
     <div className="dataset-health-card">
       <span>Schema validity</span>
       <strong>
-        {datasetMetrics.schemaValidity === null
+        {datasetMetrics.schemaValidity == null
           ? "Not assessed"
-          : `${datasetMetrics.schemaValidity}%`}
+          : `${datasetMetrics.schemaValidity.toFixed(2)}%`}
       </strong>
       <div className="health-track">
         <div style={{
           width: `${datasetMetrics.schemaValidity ?? 0}%`
         }} />
       </div>
+    </div>
+    <div className="dataset-health-grid readiness-grid">
+      <div className="dataset-health-card"><span>ML readiness estimate</span><strong>{typeof selectedDataset.mlReadiness?.score === "number" ? `${selectedDataset.mlReadiness.score.toFixed(2)}%` : "Not assessed"}</strong></div>
+      <div className="dataset-health-card"><span>Potential readiness</span><strong>{typeof selectedDataset.mlReadiness?.potentialScore === "number" ? `${selectedDataset.mlReadiness.potentialScore.toFixed(2)}%` : "Not assessed"}</strong></div>
+      <div className="dataset-health-card"><span>Improvement opportunity</span><strong>{typeof selectedDataset.mlReadiness?.improvementOpportunity === "number" ? `${selectedDataset.mlReadiness.improvementOpportunity.toFixed(2)}%` : "Not assessed"}</strong></div>
     </div>
   </div>
 </div>
@@ -1150,11 +1058,11 @@ const datasetMetrics = {
                     </tr>
                   </thead>
                   <tbody>
-                    {versions.map(version => (
+                    {[...versions].sort((a, b) => b.versionNumber - a.versionNumber).map(version => (
                       <tr
                       key={version.versionNumber}
                       onClick={() => setSelectedVersion(version)}
-                      className="version-clickable-row"
+                      className={`version-clickable-row ${selectedVersion?.versionNumber === version.versionNumber ? "selected-version-row" : ""}`}
 >
                         <td>
                           <strong>{version.label}</strong>
@@ -1164,7 +1072,7 @@ const datasetMetrics = {
                         </td>
                         <td>{version.rowCount ?? "—"}</td>
                         <td>
-                          <strong>{version.qualityScore}%</strong>
+                          <strong>{version.qualityScore == null ? "Not assessed" : `${Number(version.qualityScore).toFixed(2)}%`}</strong>
                         </td>
                         <td>{version.changeSummary?.missingValuesFilled || 0}</td>
                         <td>{version.changeSummary?.duplicateRowsRemoved || 0}</td>
@@ -1189,35 +1097,28 @@ const datasetMetrics = {
       </button>
     </div>
 
-    <div className="dataset-health-grid">
-      <div className="dataset-health-card">
-        <span>Version</span>
-        <strong>V{selectedVersion.versionNumber}</strong>
-      </div>
-      <div className="dataset-health-card">
-        <span>Rows</span>
-        <strong>{selectedVersion.rowCount ?? "—"}</strong>
-      </div>
-      <div className="dataset-health-card">
-        <span>Quality score</span>
-        <strong>{selectedVersion.qualityScore ?? "—"}%</strong>
-      </div>
-      <div className="dataset-health-card">
-        <span>Missing values filled</span>
-        <strong>{selectedVersion.changeSummary?.missingValuesFilled ?? 0}</strong>
-      </div>
-      <div className="dataset-health-card">
-        <span>Duplicates removed</span>
-        <strong>{selectedVersion.changeSummary?.duplicateRowsRemoved ?? 0}</strong>
-      </div>
-      <div className="dataset-health-card">
-        <span>Created</span>
-        <strong>
-          {selectedVersion.createdAt
-            ? new Date(selectedVersion.createdAt).toLocaleString()
-            : "—"}
-        </strong>
-      </div>
+    <div className="dataset-health-grid version-summary-grid">
+      <div className="dataset-health-card"><span>Version</span><strong>V{selectedVersion.versionNumber}</strong></div>
+      <div className="dataset-health-card"><span>Rows</span><strong>{selectedVersion.rowCount ?? "—"}</strong></div>
+      <div className="dataset-health-card"><span>Quality score</span><strong>{selectedVersion.qualityScore == null ? "Not assessed" : `${Number(selectedVersion.qualityScore).toFixed(2)}%`}</strong></div>
+      <div className="dataset-health-card"><span>Missing values filled</span><strong>{selectedVersion.changeSummary?.missingValuesFilled ?? 0}</strong></div>
+      <div className="dataset-health-card"><span>Duplicates removed</span><strong>{selectedVersion.changeSummary?.duplicateRowsRemoved ?? 0}</strong></div>
+      <div className="dataset-health-card"><span>Created</span><strong>{selectedVersion.createdAt ? new Date(selectedVersion.createdAt).toLocaleString() : "—"}</strong></div>
+    </div>
+
+    <h4 className="version-metrics-heading">Quality dimensions for this version</h4>
+    <div className="dataset-health-grid version-metric-grid">
+      {[
+        { label: "Completeness", value: selectedVersion.qualityMetrics?.completeness },
+        { label: "Uniqueness", value: selectedVersion.qualityMetrics?.uniqueness },
+        { label: "Schema validity", value: selectedVersion.qualityMetrics?.schemaCompliance }
+      ].map(metric => (
+        <div className="dataset-health-card" key={metric.label}>
+          <span>{metric.label}</span>
+          <strong>{typeof metric.value === "number" ? `${metric.value.toFixed(2)}%` : "Not assessed"}</strong>
+          <div className="health-track"><div style={{ width: `${typeof metric.value === "number" ? Math.min(100, Math.max(0, metric.value)) : 0}%` }} /></div>
+        </div>
+      ))}
     </div>
   </div>
 )}
@@ -1243,7 +1144,11 @@ const datasetMetrics = {
                 </div>
 
 <div className="schema-validation-section">
-  <h3>Schema Validation</h3>
+  <button className="section-toggle" type="button" onClick={() => setSchemaSectionOpen(value => !value)} aria-expanded={schemaSectionOpen}>
+    <span><h3>Schema Validation</h3><small>{(selectedDataset.profile || []).length} columns in dataset</small></span>
+    <ChevronDown className={schemaSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
+  </button>
+  {schemaSectionOpen && <>
   <p>
     Review automatically inferred data types or select an expected
     type manually to identify inconsistent values.
@@ -1366,7 +1271,8 @@ const datasetMetrics = {
                     );
                   })}
                 </div>
-              </div>
+  </>}
+</div>
 
                 <h3>Detected missing cells</h3>
                 {cleaningPreview.missingCells.length ? (
@@ -1391,7 +1297,11 @@ const datasetMetrics = {
 
                         
         <div className="column-cleaning-section">
-          <h3>Choose a cleaning strategy for each column</h3>
+          <button className="section-toggle" type="button" onClick={() => setMissingSectionOpen(value => !value)} aria-expanded={missingSectionOpen}>
+            <span><h3>Missing Value Cleaning</h3><small>{cleaningPreview.missingValuesFound || 0} missing cells detected</small></span>
+            <ChevronDown className={missingSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
+          </button>
+          {missingSectionOpen && <>
           <p>
             Select how DataLens should handle missing values in each column.
             You can choose a different method for every column.
@@ -1462,20 +1372,55 @@ const datasetMetrics = {
           ) : (
             <p>No missing values require a column-specific strategy.</p>
           )}
+          </>}
         </div>
 
-        
+        <div className="column-cleaning-section">
+          <button className="section-toggle" type="button" onClick={() => setInvalidSectionOpen(value => !value)} aria-expanded={invalidSectionOpen}>
+            <span><h3>Invalid Value Treatment</h3><small>{cleaningPreview.schemaColumns?.reduce((sum, item) => sum + (item.mismatchCount || 0), 0) || 0} detected type mismatches</small></span>
+            <ChevronDown className={invalidSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
+          </button>
+          {invalidSectionOpen && <>
+            <p>Choose how to handle values that do not match the expected data type. Select an expected type before applying a replacement.</p>
+            {(cleaningPreview.schemaColumns || []).length ? cleaningPreview.schemaColumns.map(item => {
+              const strategy = invalidStrategies[item.column] || { method: "keep", expectedType: "", value: "" };
+              return <div className="column-strategy-card" key={`invalid-${item.column}`}>
+                <div className="column-strategy-info"><strong>{item.column}</strong><span>{item.mismatchCount || 0} mismatched values</span></div>
+                <label>Expected type<select value={strategy.expectedType} onChange={event => setInvalidStrategies(previous => ({ ...previous, [item.column]: { ...strategy, expectedType: event.target.value } }))}><option value="">Select type</option><option value="numeric">Numeric</option><option value="categorical">Text / Categorical</option><option value="boolean">Boolean</option><option value="date">Date</option></select></label>
+                <label>Treatment<select value={strategy.method} onChange={event => setInvalidStrategies(previous => ({ ...previous, [item.column]: { ...strategy, method: event.target.value } }))}><option value="keep">Keep unchanged</option><option value="drop_rows">Remove affected rows</option><option value="mode">Replace with mode</option><option value="median">Replace with median</option><option value="mean">Replace with mean</option><option value="custom">Custom value</option></select></label>
+                {strategy.method === "custom" && <label>Replacement value<input value={strategy.value || ""} onChange={event => setInvalidStrategies(previous => ({ ...previous, [item.column]: { ...strategy, value: event.target.value } }))} /></label>}
+              </div>;
+            }) : <p>No schema mismatches detected.</p>}
+          </>}
+        </div>
+
+        <div className="column-cleaning-section">
+          <button className="section-toggle" type="button" onClick={() => setOutlierSectionOpen(value => !value)} aria-expanded={outlierSectionOpen}>
+            <span><h3>Outlier Treatment</h3><small>{cleaningPreview.totalOutliers || 0} detected outliers</small></span>
+            <ChevronDown className={outlierSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
+          </button>
+          {outlierSectionOpen && <>
+            <p>Outliers are flagged for review; they are not automatically treated as errors.</p>
+            {(cleaningPreview.outlierColumns || []).length ? cleaningPreview.outlierColumns.map(item => {
+              const strategy = outlierStrategies[item.column] || { method: "keep", value: "" };
+              return <div className="column-strategy-card" key={`outlier-${item.column}`}>
+                <div className="column-strategy-info"><strong>{item.column}</strong><span>{item.outlierCount} outliers ({item.outlierPercentage}%) · IQR bounds: {item.lowerBound} to {item.upperBound}</span></div>
+                <label>Treatment<select value={strategy.method} onChange={event => setOutlierStrategies(previous => ({ ...previous, [item.column]: { ...strategy, method: event.target.value } }))}><option value="keep">Keep unchanged</option><option value="drop_rows">Remove affected rows</option><option value="median">Replace with median</option><option value="mean">Replace with mean</option><option value="mode">Replace with mode</option><option value="custom">Custom value</option></select></label>
+                {strategy.method === "custom" && <label>Replacement value<input value={strategy.value || ""} onChange={event => setOutlierStrategies(previous => ({ ...previous, [item.column]: { ...strategy, value: event.target.value } }))} /></label>}
+              </div>;
+            }) : <p>No outliers detected.</p>}
+          </>}
+        </div>
 
                 <button
                   className="primary-button"
                   onClick={applyCleaning}
                   disabled={
                     cleaning ||
-                    Object.values(columnStrategies).some(
-                      strategy =>
-                        strategy.method === "custom" &&
-                        !strategy.value?.trim()
-                    )
+                    [...Object.values(columnStrategies), ...Object.values(invalidStrategies), ...Object.values(outlierStrategies)].some(
+                      strategy => strategy.method === "custom" && !String(strategy.value || "").trim()
+                    ) ||
+                    Object.values(invalidStrategies).some(strategy => !strategy.expectedType)
                   }
                 >
                   <Sparkles size={16} />
@@ -1487,6 +1432,118 @@ const datasetMetrics = {
             )}
           </section>
         )}
+
+        <section className="panel open-data-panel" id="open-data">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">EXTERNAL API INTEGRATION</p>
+              <h2>Open Data Explorer</h2>
+              <p>Discover public datasets from Ireland's open-data catalogue.</p>
+            </div>
+            <div className="open-data-source">data.gov.ie</div>
+          </div>
+
+          <form className="open-data-search" onSubmit={searchOpenData}>
+            <input
+              type="search"
+              value={openDataQuery}
+              onChange={event => setOpenDataQuery(event.target.value)}
+              placeholder="Search public datasets..."
+              aria-label="Search public datasets"
+            />
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={openDataLoading}
+            >
+              {openDataLoading ? "Searching..." : "Search catalogue"}
+            </button>
+          </form>
+
+          {openDataError && (
+            <div className="error-message">
+              <AlertCircle size={17} /> {openDataError}
+            </div>
+          )}
+
+          {openDataLoading && <p>Searching the Irish open-data catalogue...</p>}
+
+          {!openDataLoading && openDataResults.length > 0 && (
+            <>
+              <p className="open-data-count">
+                Showing {openDataResults.length} results from {openDataTotal.toLocaleString()} matching catalogue records.
+              </p>
+
+              <div className="open-data-results">
+                {openDataResults.map(dataset => (
+                  <article className="open-data-card" key={dataset.id}>
+                    <div className="open-data-card-heading">
+                      <div>
+                        <h3>{dataset.title}</h3>
+                        <span>{dataset.organization}</span>
+                      </div>
+                      <span className="status-pill good">Public dataset</span>
+                    </div>
+
+                    <p className="open-data-description">
+                      {dataset.description || "No description provided by the publisher."}
+                    </p>
+
+                    <div className="open-data-meta">
+                      <span><strong>Licence:</strong> {dataset.license}</span>
+                      <span>
+                        <strong>Modified:</strong>{" "}
+                        {dataset.modified
+                          ? new Date(dataset.modified).toLocaleDateString()
+                          : "Not specified"}
+                      </span>
+                    </div>
+
+                    {dataset.tags?.length > 0 && (
+                      <div className="open-data-tags">
+                        {dataset.tags.slice(0, 5).map(tag => (
+                          <span key={tag}>{tag}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {dataset.resources?.length > 0 && (
+                      <div className="open-data-resources">
+                        <strong>Available resources</strong>
+                        {dataset.resources.slice(0, 4).map(resource => (
+                          <a
+                            key={resource.id}
+                            href={resource.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {resource.name} ({resource.format})
+                            <ArrowUpRight size={14} />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+
+                    <a
+                      className="open-data-portal-link"
+                      href={dataset.portalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View dataset on data.gov.ie <ArrowUpRight size={15} />
+                    </a>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {!openDataLoading && openDataResults.length === 0 && !openDataError && (
+            <p className="open-data-empty">
+              Search for transport, housing, population or other public datasets.
+            </p>
+          )}
+        </section>
 
         <footer className="footer">
           <span>DataLens · Data Quality Assessment Platform</span>
