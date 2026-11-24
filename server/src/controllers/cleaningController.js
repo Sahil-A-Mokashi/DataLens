@@ -28,6 +28,7 @@ const findDataset = async (id, owner) => {
   }).select("+records");
 };
 
+
 const calculateReplacement = (values, method, customValue) => {
   const usable = values.filter((value) => !isMissing(value));
 
@@ -43,30 +44,32 @@ const calculateReplacement = (values, method, customValue) => {
     return String(customValue).trim();
   }
 
-  if (!usable.length) {
-    throw new Error("No valid values available to calculate replacement");
-  }
-
   if (method === "mode") {
+    if (!usable.length) {
+      throw new Error("No valid values available to calculate mode");
+    }
+
     return getMode(usable.map((value) => String(value).trim()))?.value;
   }
 
-  const numericValues = usable
-    .map(Number)
-    .filter(Number.isFinite);
+  if (method === "mean" || method === "median") {
+    // Ignore invalid text values such as "Not provided".
+    const numericValues = usable
+      .filter((value) => classifyValue(value) === "numeric")
+      .map(Number)
+      .filter(Number.isFinite);
 
-  if (!numericValues.length || numericValues.length !== usable.length) {
-    throw new Error(`${method} requires valid numeric values`);
-  }
+    if (!numericValues.length) {
+      throw new Error(`${method} requires valid numeric values`);
+    }
 
-  if (method === "mean") {
-    return (
-      numericValues.reduce((sum, value) => sum + value, 0) /
-      numericValues.length
-    );
-  }
+    if (method === "mean") {
+      return (
+        numericValues.reduce((sum, value) => sum + value, 0) /
+        numericValues.length
+      );
+    }
 
-  if (method === "median") {
     return median(numericValues);
   }
 
@@ -257,15 +260,17 @@ const previewCleaning = async (req, res) => {
     const seenRows = new Set();
 
     columns.forEach((column) => {
-      const values = records.map((record) => record[column]);
-      const nonMissing = values.filter((value) => !isMissing(value));
+  const values = records.map((record) => record[column]);
+  const nonMissing = values.filter((value) => !isMissing(value));
 
-      const missingCount = values.length - nonMissing.length;
+  const missingCount = values.length - nonMissing.length;
 
-      if (missingCount > 0) {
-        const profile = dataset.profile?.find(
-          (item) => item.column === column
-        );
+  // Retrieve the column profile for all checks below.
+  const profile = dataset.profile?.find(
+    (item) => item.column === column
+  );
+
+  if (missingCount > 0) {
 
         const inferredType = profile?.inferredType || "categorical";
 
