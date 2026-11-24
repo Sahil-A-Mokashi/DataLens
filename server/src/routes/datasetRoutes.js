@@ -2,7 +2,8 @@
 const express = require("express");
 const {
   previewCleaning,
-  applyCleaning
+  applyCleaning,
+  exportDataset
 } = require("../controllers/cleaningController");
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.post("/upload", uploadCSV);
 router.get("/", getDatasets);
 router.get("/:id/cleaning-preview", previewCleaning);
 router.post("/:id/clean", applyCleaning);
+router.get("/:id/export", exportDataset);
 router.get("/:id", getDatasetById);
 
 module.exports = router;

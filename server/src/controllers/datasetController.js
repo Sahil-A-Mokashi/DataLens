@@ -36,7 +36,9 @@ exports.uploadCSV = [
         header: true,
         skipEmptyLines: true,
         transformHeader: (header) => header.trim(),
-      });
+        transform: (value) =>
+            typeof value === "string" ? value.trim() : value,
+        });
 
       if (parsed.errors.length > 0) {
         return res.status(400).json({

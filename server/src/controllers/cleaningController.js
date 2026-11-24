@@ -1,7 +1,7 @@
 
 const Dataset = require("../models/Dataset");
 const DatasetVersion = require("../models/DatasetVersion");
-
+const Papa = require("papaparse");
 
 const applyCleaning = async (req, res) => {
   try {
@@ -132,6 +132,93 @@ const applyCleaning = async (req, res) => {
 };
 
 
+
+const exportDataset = async (req, res) => {
+  try {
+    const { version } = req.query;
+
+    const dataset = await Dataset.findOne({
+      _id: req.params.id,
+      owner: req.user._id
+    }).select("+records");
+
+    if (!dataset) {
+      return res.status(404).json({
+        success: false,
+        message: "Dataset not found"
+      });
+    }
+
+    let records = dataset.records;
+    let filename = `${dataset.name}-original.csv`;
+
+    // If a version number is supplied, export that cleaned version.
+    if (version !== undefined) {
+      const versionNumber = Number(version);
+
+      if (!Number.isInteger(versionNumber) || versionNumber < 2) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid version number"
+        });
+      }
+
+      const datasetVersion = await DatasetVersion.findOne({
+        dataset: dataset._id,
+        owner: req.user._id,
+        versionNumber
+      }).select("+records");
+
+      if (!datasetVersion) {
+        return res.status(404).json({
+          success: false,
+          message: "Dataset version not found"
+        });
+      }
+
+      records = datasetVersion.records;
+      filename = `${dataset.name}-version-${versionNumber}.csv`;
+    }
+
+    // Protect spreadsheet users from formula injection.
+    const safeRecords = records.map(record => {
+      const safeRecord = {};
+
+      for (const column of dataset.columns) {
+        const value = record[column];
+
+        safeRecord[column] =
+          typeof value === "string" &&
+          /^[\s]*[=+\-@]/.test(value)
+            ? `'${value}`
+            : value;
+      }
+
+      return safeRecord;
+    });
+
+    const csv = Papa.unparse(safeRecords, {
+      columns: dataset.columns
+    });
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`
+    );
+
+    return res.status(200).send(csv);
+  } catch (error) {
+    console.error("Dataset export error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to export dataset"
+    });
+  }
+};
+
+
 const previewCleaning = async (req, res) => {
   try {
     const dataset = await Dataset.findOne({
@@ -205,4 +292,8 @@ const previewCleaning = async (req, res) => {
   }
 };
 
-module.exports = { previewCleaning, applyCleaning };
+module.exports = {
+  previewCleaning,
+  applyCleaning,
+  exportDataset
+};
