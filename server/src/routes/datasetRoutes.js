@@ -1,5 +1,9 @@
 
 const express = require("express");
+const {
+  previewCleaning,
+  applyCleaning
+} = require("../controllers/cleaningController");
 const router = express.Router();
 
 const { protect } = require("../middleware/authMiddleware");
@@ -14,6 +18,8 @@ router.use(protect);
 
 router.post("/upload", uploadCSV);
 router.get("/", getDatasets);
+router.get("/:id/cleaning-preview", previewCleaning);
+router.post("/:id/clean", applyCleaning);
 router.get("/:id", getDatasetById);
 
 module.exports = router;
