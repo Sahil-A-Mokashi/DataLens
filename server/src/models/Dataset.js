@@ -7,109 +7,235 @@ const datasetSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
+      index: true
     },
 
     name: {
       type: String,
       required: true,
       trim: true,
-      maxlength: 150,
+      maxlength: 150
     },
 
     originalFilename: {
       type: String,
-      required: true,
+      required: true
     },
 
+    // Currently active columns
     columns: {
       type: [String],
       required: true,
+      default: []
+    },
+
+    // Removed columns are archived so they can be restored.
+    archivedColumns: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
+
+    // Original uploaded column names, retained for reference.
+    originalColumns: {
+      type: [String],
+      default: []
     },
 
     rowCount: {
       type: Number,
       required: true,
-      min: 0,
+      min: 0
     },
 
     columnCount: {
       type: Number,
       required: true,
-      min: 0,
+      min: 0
     },
 
+    // Current active dataset records.
     records: {
       type: [mongoose.Schema.Types.Mixed],
       default: [],
-      select: false,
+      select: false
     },
 
-    // Overall data quality score (0–100)
+    // Overall data quality score.
     qualityScore: {
       type: Number,
-      default: 100,
+      default: null,
       min: 0,
-      max: 100,
+      max: 100
     },
 
-    // Existing issue counts — retained for compatibility
-    issueSummary: {
-      missingValues: { type: Number, default: 0 },
-      duplicateRows: { type: Number, default: 0 },
-      invalidValues: { type: Number, default: 0 },
-    },
-
-    // Detailed quality dimensions
+    // Six independently calculated quality dimensions.
     qualityMetrics: {
-      completeness: { type: Number, default: 100 },
-      validity: { type: Number, default: 100 },
-      consistency: { type: Number, default: 100 },
-      uniqueness: { type: Number, default: 100 },
+      completeness: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      validity: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      uniqueness: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      consistency: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      schemaCompliance: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      structuralIntegrity: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      }
     },
 
-    // Per-column profiling results
-    profile: {
-      type: [mongoose.Schema.Types.Mixed],
-      default: [],
+    issueSummary: {
+      missingValues: {
+        type: Number,
+        default: 0
+      },
+      duplicateRows: {
+        type: Number,
+        default: 0
+      },
+      invalidValues: {
+        type: Number,
+        default: 0
+      },
+      outliers: {
+        type: Number,
+        default: 0
+      }
     },
 
-    // CSV structure and parsing warnings
-    structuralIssues: {
-      type: [mongoose.Schema.Types.Mixed],
-      default: [],
+    outlierSummary: {
+      totalOutliers: {
+        type: Number,
+        default: 0
+      },
+      numericObservations: {
+        type: Number,
+        default: 0
+      },
+      outlierPercentage: {
+        type: Number,
+        default: 0
+      },
+      affectedColumns: {
+        type: Number,
+        default: 0
+      }
     },
 
-    // Heuristic assessment — not measured model performance
+    // Current and potential ML-readiness estimates.
     mlReadiness: {
-      score: { type: Number, min: 0, max: 100 },
+      score: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      potentialScore: {
+        type: Number,
+        default: null,
+        min: 0,
+        max: 100
+      },
+      improvementOpportunity: {
+        type: Number,
+        default: null
+      },
       level: {
         type: String,
         enum: ["low", "moderate", "high", null],
-        default: null,
+        default: null
       },
       warnings: {
         type: [mongoose.Schema.Types.Mixed],
-        default: [],
+        default: []
       },
+      scoreType: {
+        type: String,
+        default: "heuristic_readiness_not_model_accuracy"
+      }
     },
 
+    // Counts of issues that may be corrected.
+    correctionOpportunities: {
+      missingValues: {
+        type: Number,
+        default: 0
+      },
+      schemaMismatches: {
+        type: Number,
+        default: 0
+      },
+      duplicateRows: {
+        type: Number,
+        default: 0
+      },
+      whitespaceValues: {
+        type: Number,
+        default: 0
+      },
+      outliers: {
+        type: Number,
+        default: 0
+      }
+    },
+
+    // Column-level profiling results.
+    profile: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
+
+    // Structural changes and warnings.
+    structuralIssues: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
+
+    // Tracks the most recent profiling run.
     lastAnalysisAt: {
       type: Date,
-      default: null,
+      default: null
     },
 
     status: {
       type: String,
       enum: ["uploaded", "analysed", "cleaned"],
-      default: "uploaded",
-    },
+      default: "uploaded"
+    }
   },
   {
-    timestamps: true,
+    timestamps: true
   }
 );
 
-datasetSchema.index({ owner: 1, createdAt: -1 });
+// Efficient owner-specific dataset listing.
+datasetSchema.index({
+  owner: 1,
+  createdAt: -1
+});
 
 module.exports = mongoose.model("Dataset", datasetSchema);
