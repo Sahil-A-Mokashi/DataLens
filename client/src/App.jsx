@@ -50,9 +50,19 @@ const [columnStrategies, setColumnStrategies] = useState({});
 const [invalidStrategies, setInvalidStrategies] = useState({});
 const [outlierStrategies, setOutlierStrategies] = useState({});
 const [schemaSectionOpen, setSchemaSectionOpen] = useState(true);
-const [missingSectionOpen, setMissingSectionOpen] = useState(true);
-const [invalidSectionOpen, setInvalidSectionOpen] = useState(true);
-const [outlierSectionOpen, setOutlierSectionOpen] = useState(true);
+const [missingSectionOpen, setMissingSectionOpen] = useState(false);
+const [invalidSectionOpen, setInvalidSectionOpen] = useState(false);
+const [outlierSectionOpen, setOutlierSectionOpen] = useState(false);
+const [invalidColumnView, setInvalidColumnView] = useState("");
+const [outlierColumnView, setOutlierColumnView] = useState("");
+const [invalidViewAllRows, setInvalidViewAllRows] = useState(false);
+const [outlierViewAllRows, setOutlierViewAllRows] = useState(false);
+const [invalidExcludedRows, setInvalidExcludedRows] = useState({});
+const [outlierExcludedRows, setOutlierExcludedRows] = useState({});
+const [columnManagerOpen, setColumnManagerOpen] = useState(false);
+const [newColumn, setNewColumn] = useState({ name: "", type: "fixed", value: "", start: "1", step: "1", startDate: "", interval: "daily", formula: "" });
+const [renameDrafts, setRenameDrafts] = useState({});
+const [deletingDataset, setDeletingDataset] = useState(false);
 
 const [schemaSelections, setSchemaSelections] = useState({});
 const [schemaResults, setSchemaResults] = useState({});
@@ -212,11 +222,6 @@ useEffect(() => {
       return;
     }
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError("File size must be 2 MB or less.");
-      return;
-    }
-
     const formData = new FormData();
     formData.append("file", file);
 
@@ -249,15 +254,27 @@ useEffect(() => {
     setMessage("");
 
     try {
-      const [previewResponse, versionsResponse] = await Promise.all([
+      const [previewResponse, versionsResponse, detailResponse] = await Promise.all([
         apiRequest(`/api/datasets/${dataset._id}/cleaning-preview`),
-        apiRequest(`/api/datasets/${dataset._id}/versions`)
+        apiRequest(`/api/datasets/${dataset._id}/versions`),
+        apiRequest(`/api/datasets/${dataset._id}`)
       ]);
 
       const previewData = await previewResponse.json();
       const versionsData = await versionsResponse.json();
+      const detailData = await detailResponse.json();
+      setSelectedDataset(detailData.dataset || dataset);
 
       setCleaningPreview(previewData.preview);
+      setMissingSectionOpen((previewData.preview.missingColumns || []).length > 0);
+      setInvalidSectionOpen((previewData.preview.schemaColumns || []).length > 0);
+      setOutlierSectionOpen((previewData.preview.outlierColumns || []).length > 0);
+      setInvalidColumnView(previewData.preview.schemaColumns?.[0]?.column || "");
+      setOutlierColumnView(previewData.preview.outlierColumns?.[0]?.column || "");
+      setInvalidViewAllRows(false);
+      setOutlierViewAllRows(false);
+      setInvalidExcludedRows({});
+      setOutlierExcludedRows({});
 
       const initialStrategies = {};
 
@@ -387,8 +404,18 @@ async function validateSchema(column) {
           },
           body: JSON.stringify({
             columnStrategies,
-            invalidStrategies,
-            outlierStrategies,
+            invalidStrategies: Object.fromEntries(
+              Object.entries(invalidStrategies).map(([column, strategy]) => [
+                column,
+                { ...strategy, excludedRows: invalidExcludedRows[column] || [] }
+              ])
+            ),
+            outlierStrategies: Object.fromEntries(
+              Object.entries(outlierStrategies).map(([column, strategy]) => [
+                column,
+                { ...strategy, excludedRows: outlierExcludedRows[column] || [] }
+              ])
+            ),
             removeDuplicates: true
           })
         }
@@ -400,7 +427,12 @@ async function validateSchema(column) {
         `Cleaning complete. Version ${data.version.versionNumber} created.`
       );
 
-      await loadDatasets();
+      const refreshedDatasetsResponse = await apiRequest("/api/datasets");
+      const refreshedDatasetsData = await refreshedDatasetsResponse.json();
+      const refreshedDatasets = refreshedDatasetsData.datasets || [];
+      setDatasets(refreshedDatasets);
+      const refreshedSelected = refreshedDatasets.find(item => item._id === selectedDataset._id);
+      if (refreshedSelected) setSelectedDataset(refreshedSelected);
 
       const versionsResponse = await apiRequest(
         `/api/datasets/${selectedDataset._id}/versions`
@@ -417,13 +449,96 @@ async function validateSchema(column) {
         `/api/datasets/${selectedDataset._id}/cleaning-preview`
       );
       const previewData = await previewResponse.json();
-
+      const detailResponse = await apiRequest(`/api/datasets/${selectedDataset._id}`);
+      const detailData = await detailResponse.json();
+      setSelectedDataset(detailData.dataset || selectedDataset);
       setCleaningPreview(previewData.preview);
     } catch (err) {
       setError(err.message);
     } finally {
       setCleaning(false);
     }
+  }
+
+
+  async function refreshSelectedDataset() {
+    if (!selectedDataset) return;
+    const [datasetResponse, previewResponse, versionsResponse] = await Promise.all([
+      apiRequest(`/api/datasets/${selectedDataset._id}`),
+      apiRequest(`/api/datasets/${selectedDataset._id}/cleaning-preview`),
+      apiRequest(`/api/datasets/${selectedDataset._id}/versions`)
+    ]);
+    const datasetData = await datasetResponse.json();
+    const previewData = await previewResponse.json();
+    const versionsData = await versionsResponse.json();
+    setSelectedDataset(datasetData.dataset);
+    setCleaningPreview(previewData.preview);
+    const sorted = [...(versionsData.versions || [])].sort((a, b) => b.versionNumber - a.versionNumber);
+    setVersions(sorted);
+    setSelectedVersion(sorted[0] || null);
+    await loadDatasets();
+  }
+
+  async function deleteSelectedDataset(dataset = selectedDataset) {
+    if (!dataset) return;
+    const confirmed = window.confirm(`Delete "${dataset.name}" and all its version history? This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingDataset(true);
+    setError("");
+    try {
+      await apiRequest(`/api/datasets/${dataset._id}`, { method: "DELETE" });
+      setDatasets(previous => previous.filter(item => item._id !== dataset._id));
+      if (selectedDataset?._id === dataset._id) {
+        setSelectedDataset(null);
+        setCleaningPreview(null);
+        setVersions([]);
+        setSelectedVersion(null);
+      }
+      setMessage(`"${dataset.name}" and its version history were deleted.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingDataset(false);
+    }
+  }
+
+  async function runColumnOperation(path, body, successMessage) {
+    if (!selectedDataset) return;
+    setError("");
+    setMessage("");
+    try {
+      const response = await apiRequest(`/api/datasets/${selectedDataset._id}/columns/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json();
+      setMessage(`${successMessage} New version ${data.versionNumber} created.`);
+      await refreshSelectedDataset();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function addSchemaColumn(event) {
+    event.preventDefault();
+    await runColumnOperation("add", newColumn, "Column added.");
+    setNewColumn({ name: "", type: "fixed", value: "", start: "1", step: "1", startDate: "", interval: "daily", formula: "" });
+  }
+
+  async function renameSchemaColumn(oldName) {
+    const newName = (renameDrafts[oldName] || oldName).trim();
+    if (!newName || newName === oldName) return;
+    await runColumnOperation("rename", { oldName, newName }, "Column renamed.");
+  }
+
+  async function removeSchemaColumn(column) {
+    if (!window.confirm(`Remove "${column}" from the active dataset? Its values will be archived and can be restored.`)) return;
+    await runColumnOperation("remove", { column }, "Column removed.");
+  }
+
+  async function restoreSchemaColumn(column) {
+    await runColumnOperation("restore", { column }, "Column restored.");
   }
 
   async function exportDataset(dataset, version) {
@@ -852,12 +967,22 @@ async function searchOpenData(event) {
                           </span>
                         </td>
                         <td>
-                          <button
-                            className="text-button"
-                            onClick={() => openCleaningPreview(dataset)}
-                          >
-                            Review
-                          </button>
+                          <div className="table-actions">
+                            <button
+                              className="text-button"
+                              onClick={() => openCleaningPreview(dataset)}
+                            >
+                              Review
+                            </button>
+                            <button
+                              className="text-button danger-text"
+                              onClick={() => deleteSelectedDataset(dataset)}
+                              disabled={deletingDataset}
+                              title="Delete dataset and all versions"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1154,6 +1279,47 @@ async function searchOpenData(event) {
     type manually to identify inconsistent values.
   </p>
 
+
+  <div className="schema-manager">
+    <div className="schema-manager-heading">
+      <div>
+        <h3>Column management</h3>
+        <p>Add, rename, remove or restore columns. Every change creates a new dataset version.</p>
+      </div>
+      <button className="secondary-button" type="button" onClick={() => setColumnManagerOpen(value => !value)}>
+        {columnManagerOpen ? "Hide tools" : "Manage columns"}
+      </button>
+    </div>
+    {columnManagerOpen && <>
+      <form className="schema-add-form" onSubmit={addSchemaColumn}>
+        <label>New column name<input required maxLength="150" value={newColumn.name} onChange={e => setNewColumn(p => ({...p, name:e.target.value}))} placeholder="e.g. Region" /></label>
+        <label>Creation method<select value={newColumn.type} onChange={e => setNewColumn(p => ({...p, type:e.target.value}))}>
+          <option value="fixed">Same value for all rows</option><option value="increment">Numeric sequence</option><option value="date_sequence">Date sequence</option><option value="formula">Formula</option>
+        </select></label>
+        {newColumn.type === "fixed" && <label>Value<input value={newColumn.value} onChange={e => setNewColumn(p => ({...p, value:e.target.value}))} /></label>}
+        {newColumn.type === "increment" && <><label>Start<input type="number" value={newColumn.start} onChange={e => setNewColumn(p => ({...p, start:e.target.value}))} /></label><label>Step<input type="number" value={newColumn.step} onChange={e => setNewColumn(p => ({...p, step:e.target.value}))} /></label></>}
+        {newColumn.type === "date_sequence" && <><label>Start date<input type="date" required value={newColumn.startDate} onChange={e => setNewColumn(p => ({...p, startDate:e.target.value}))} /></label><label>Interval<select value={newColumn.interval} onChange={e => setNewColumn(p => ({...p, interval:e.target.value}))}><option value="daily">Daily</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label></>}
+        {newColumn.type === "formula" && <label className="schema-formula-field">Formula<input required value={newColumn.formula} onChange={e => setNewColumn(p => ({...p, formula:e.target.value}))} placeholder="e.g. Age * 2 + 5" /><small>Use numeric column names, numbers and + − × ÷ parentheses.</small></label>}
+        <button className="primary-button" type="submit">Add column</button>
+      </form>
+      <div className="schema-column-management-list">
+        {(selectedDataset.columns || []).map(column => <div className="schema-column-management-row" key={column}>
+          <strong>{column}</strong>
+          <input aria-label={`Rename ${column}`} value={renameDrafts[column] ?? column} onChange={e => setRenameDrafts(p => ({...p, [column]:e.target.value}))} />
+          <button className="secondary-button" type="button" onClick={() => renameSchemaColumn(column)}>Rename</button>
+          <button className="text-button danger-text" type="button" onClick={() => removeSchemaColumn(column)}>Remove</button>
+        </div>)}
+        {(selectedDataset.archivedColumns || []).length > 0 && <div className="archived-columns">
+          <strong>Archived columns</strong>
+          {(selectedDataset.archivedColumns || []).map(item => <div className="schema-column-management-row" key={item.name}>
+            <span>{item.name}</span><span className="muted-copy">Archived</span>
+            <button className="secondary-button" type="button" onClick={() => restoreSchemaColumn(item.name)}>Restore</button>
+          </div>)}
+        </div>}
+      </div>
+    </>}
+  </div>
+
   <div className="schema-validation-list">
     {(selectedDataset.profile || []).map(profile => {
       const column = profile.column;
@@ -1394,21 +1560,89 @@ async function searchOpenData(event) {
           </>}
         </div>
 
+
+        <div className="column-cleaning-section">
+          <button className="section-toggle" type="button" onClick={() => setInvalidSectionOpen(value => !value)} aria-expanded={invalidSectionOpen}>
+            <span><h3>Invalid Value Treatment</h3><small>{cleaningPreview.schemaColumns?.reduce((sum, item) => sum + (item.mismatchCount || 0), 0) || 0} detected type mismatches</small></span>
+            <ChevronDown className={invalidSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
+          </button>
+          {invalidSectionOpen && <>
+            <p>Choose a column to inspect only its invalid rows, or switch to all rows. Exclude individual rows from treatment when a flagged value is legitimate.</p>
+            {(cleaningPreview.schemaColumns || []).length ? <>
+              <div className="issue-workspace">
+                <div className="issue-column-list">
+                  {(cleaningPreview.schemaColumns || []).map(item => <button type="button" key={item.column} className={`issue-column-button ${invalidColumnView === item.column ? "active" : ""}`} onClick={() => {setInvalidColumnView(item.column); setInvalidViewAllRows(false);}}>
+                    <strong>{item.column}</strong><span>{item.mismatchCount || 0} invalid</span>
+                  </button>)}
+                </div>
+                {(() => {
+                  const item = cleaningPreview.schemaColumns.find(row => row.column === invalidColumnView) || cleaningPreview.schemaColumns[0];
+                  const strategy = invalidStrategies[item.column] || {method:"keep", expectedType:item.inferredType || "", value:""};
+                  const excluded = invalidExcludedRows[item.column] || [];
+                  const invalidRows = item.mismatches || [];
+                  const visibleRows = invalidViewAllRows
+                    ? (selectedDataset.records || []).map((record, index) => ({row:index + 2, value:record[item.column], detectedType: "—", expectedType:strategy.expectedType, invalid:invalidRows.some(row => row.row === index + 2)}))
+                    : invalidRows;
+                  return <div className="issue-detail-panel">
+                    <div className="issue-detail-heading"><div><h4>{item.column}</h4><p>{invalidRows.length} mismatched values · {excluded.length} excluded</p></div>
+                      <label className="inline-check"><input type="checkbox" checked={invalidViewAllRows} onChange={e => setInvalidViewAllRows(e.target.checked)} /> Show all rows</label>
+                    </div>
+                    <div className="issue-controls">
+                      <label>Expected type<select value={strategy.expectedType || ""} onChange={e => setInvalidStrategies(p => ({...p,[item.column]:{...strategy,expectedType:e.target.value}}))}><option value="">Select type</option><option value="numeric">Numeric</option><option value="categorical">Text / Categorical</option><option value="boolean">Boolean</option><option value="date">Date</option></select></label>
+                      <label>Treatment<select value={strategy.method} onChange={e => setInvalidStrategies(p => ({...p,[item.column]:{...strategy,method:e.target.value}}))}><option value="keep">Keep unchanged</option><option value="drop_rows">Remove affected rows</option><option value="mode">Replace with mode</option><option value="median">Replace with median</option><option value="mean">Replace with mean</option><option value="custom">Custom value</option></select></label>
+                      {strategy.method === "custom" && <label>Replacement value<input value={strategy.value || ""} onChange={e => setInvalidStrategies(p => ({...p,[item.column]:{...strategy,value:e.target.value}}))} /></label>}
+                    </div>
+                    <div className="table-wrap issue-rows-table"><table><thead><tr><th>Exclude</th><th>Row</th><th>Value</th><th>Detected type</th><th>Expected</th></tr></thead><tbody>
+                      {visibleRows.map((row,index) => <tr key={`${row.row}-${index}`} className={row.invalid ? "issue-highlight-row" : ""}><td>{row.invalid ? <input type="checkbox" aria-label={`Exclude row ${row.row}`} checked={excluded.includes(row.row)} onChange={e => setInvalidExcludedRows(p => ({...p,[item.column]:e.target.checked?[...excluded,row.row]:excluded.filter(value=>value!==row.row)}))} /> : "—"}</td><td>{row.row}</td><td>{String(row.value ?? "")}</td><td>{row.detectedType || "—"}</td><td>{row.expectedType || strategy.expectedType || "—"}</td></tr>)}
+                      {!visibleRows.length && <tr><td colSpan="5">No invalid values detected.</td></tr>}
+                    </tbody></table></div>
+                  </div>;
+                })()}
+              </div>
+            </> : <p>No schema mismatches detected.</p>}
+          </>}
+        </div>
+
         <div className="column-cleaning-section">
           <button className="section-toggle" type="button" onClick={() => setOutlierSectionOpen(value => !value)} aria-expanded={outlierSectionOpen}>
             <span><h3>Outlier Treatment</h3><small>{cleaningPreview.totalOutliers || 0} detected outliers</small></span>
             <ChevronDown className={outlierSectionOpen ? "section-chevron open" : "section-chevron"} size={18} />
           </button>
           {outlierSectionOpen && <>
-            <p>Outliers are flagged for review; they are not automatically treated as errors.</p>
-            {(cleaningPreview.outlierColumns || []).length ? cleaningPreview.outlierColumns.map(item => {
-              const strategy = outlierStrategies[item.column] || { method: "keep", value: "" };
-              return <div className="column-strategy-card" key={`outlier-${item.column}`}>
-                <div className="column-strategy-info"><strong>{item.column}</strong><span>{item.outlierCount} outliers ({item.outlierPercentage}%) · IQR bounds: {item.lowerBound} to {item.upperBound}</span></div>
-                <label>Treatment<select value={strategy.method} onChange={event => setOutlierStrategies(previous => ({ ...previous, [item.column]: { ...strategy, method: event.target.value } }))}><option value="keep">Keep unchanged</option><option value="drop_rows">Remove affected rows</option><option value="median">Replace with median</option><option value="mean">Replace with mean</option><option value="mode">Replace with mode</option><option value="custom">Custom value</option></select></label>
-                {strategy.method === "custom" && <label>Replacement value<input value={strategy.value || ""} onChange={event => setOutlierStrategies(previous => ({ ...previous, [item.column]: { ...strategy, value: event.target.value } }))} /></label>}
-              </div>;
-            }) : <p>No outliers detected.</p>}
+            <p>Review outliers column by column. Adjust lower and upper limits independently. Flagged rows are highlighted; exclude legitimate observations from treatment.</p>
+            {(cleaningPreview.outlierColumns || []).length ? <>
+              <div className="issue-workspace">
+                <div className="issue-column-list">
+                  {(cleaningPreview.outlierColumns || []).map(item => <button type="button" key={item.column} className={`issue-column-button ${outlierColumnView === item.column ? "active" : ""}`} onClick={() => {setOutlierColumnView(item.column);setOutlierViewAllRows(false);}}>
+                    <strong>{item.column}</strong><span>{item.outlierCount} outliers</span>
+                  </button>)}
+                </div>
+                {(() => {
+                  const item = cleaningPreview.outlierColumns.find(row => row.column === outlierColumnView) || cleaningPreview.outlierColumns[0];
+                  const strategy = outlierStrategies[item.column] || {method:"keep",value:"",lowerBound:item.lowerBound,upperBound:item.upperBound};
+                  const excluded = outlierExcludedRows[item.column] || [];
+                  const flagged = item.outliers || [];
+                  const visibleRows = outlierViewAllRows
+                    ? (selectedDataset.records || []).map((record,index) => ({row:index+2,value:record[item.column],direction:flagged.find(row=>row.row===index+2)?.direction, outlier:flagged.some(row=>row.row===index+2)}))
+                    : flagged;
+                  return <div className="issue-detail-panel">
+                    <div className="issue-detail-heading"><div><h4>{item.column}</h4><p>{flagged.length} flagged values · {excluded.length} excluded</p></div>
+                      <label className="inline-check"><input type="checkbox" checked={outlierViewAllRows} onChange={e=>setOutlierViewAllRows(e.target.checked)} /> Show all rows</label>
+                    </div>
+                    <div className="issue-controls">
+                      <label>Lower constraint<input type="number" value={strategy.lowerBound ?? item.lowerBound ?? ""} onChange={e=>setOutlierStrategies(p=>({...p,[item.column]:{...strategy,lowerBound:e.target.value===""?null:Number(e.target.value)}}))} /></label>
+                      <label>Upper constraint<input type="number" value={strategy.upperBound ?? item.upperBound ?? ""} onChange={e=>setOutlierStrategies(p=>({...p,[item.column]:{...strategy,upperBound:e.target.value===""?null:Number(e.target.value)}}))} /></label>
+                      <label>Treatment<select value={strategy.method} onChange={e=>setOutlierStrategies(p=>({...p,[item.column]:{...strategy,method:e.target.value}}))}><option value="keep">Keep unchanged</option><option value="drop_rows">Remove affected rows</option><option value="median">Replace with median</option><option value="mean">Replace with mean</option><option value="mode">Replace with mode</option><option value="custom">Custom value</option></select></label>
+                      {strategy.method==="custom" && <label>Replacement value<input value={strategy.value||""} onChange={e=>setOutlierStrategies(p=>({...p,[item.column]:{...strategy,value:e.target.value}}))}/></label>}
+                    </div>
+                    <div className="table-wrap issue-rows-table"><table><thead><tr><th>Exclude</th><th>Row</th><th>Value</th><th>Flag</th></tr></thead><tbody>
+                      {visibleRows.map((row,index)=><tr key={`${row.row}-${index}`} className={row.outlier!==false && (row.outlier || flagged.some(flag=>flag.row===row.row)) ? "issue-highlight-row" : ""}><td>{(row.outlier || flagged.some(flag=>flag.row===row.row)) ? <input type="checkbox" aria-label={`Exclude row ${row.row}`} checked={excluded.includes(row.row)} onChange={e=>setOutlierExcludedRows(p=>({...p,[item.column]:e.target.checked?[...excluded,row.row]:excluded.filter(value=>value!==row.row)}))}/>:"—"}</td><td>{row.row}</td><td>{String(row.value ?? "")}</td><td>{row.direction || (row.outlier ? "Outlier" : "Within limits")}</td></tr>)}
+                      {!visibleRows.length && <tr><td colSpan="4">No outliers detected.</td></tr>}
+                    </tbody></table></div>
+                  </div>;
+                })()}
+              </div>
+            </> : <p>No outliers detected.</p>}
           </>}
         </div>
 
@@ -1546,8 +1780,8 @@ async function searchOpenData(event) {
         </section>
 
         <footer className="footer">
-          <span>DataLens · Data Quality Assessment Platform</span>
-          <span>Built for academic purposes</span>
+          <span>DataLens</span>
+          <span>© 2026C Sahil Mokashi</span>
         </footer>
       </main>
     </div>

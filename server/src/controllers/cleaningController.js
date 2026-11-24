@@ -1,11 +1,9 @@
-
 const Dataset = require("../models/Dataset");
 const DatasetVersion = require("../models/DatasetVersion");
 const Papa = require("papaparse");
 
 const {
   profileDataset,
-  validateColumnSchema,
   classifyValue,
   isMissing,
   median,
@@ -21,13 +19,8 @@ const round = (value) =>
     ? null
     : Number(Number(value).toFixed(2));
 
-const findDataset = async (id, owner) => {
-  return Dataset.findOne({
-    _id: id,
-    owner
-  }).select("+records");
-};
-
+const findDataset = async (id, owner) =>
+  Dataset.findOne({ _id: id, owner }).select("+records");
 
 const calculateReplacement = (values, method, customValue) => {
   const usable = values.filter((value) => !isMissing(value));
@@ -40,20 +33,15 @@ const calculateReplacement = (values, method, customValue) => {
     ) {
       throw new Error("A custom replacement value is required");
     }
-
     return String(customValue).trim();
   }
 
   if (method === "mode") {
-    if (!usable.length) {
-      throw new Error("No valid values available to calculate mode");
-    }
-
+    if (!usable.length) throw new Error("No valid values available to calculate mode");
     return getMode(usable.map((value) => String(value).trim()))?.value;
   }
 
   if (method === "mean" || method === "median") {
-    // Ignore invalid text values such as "Not provided".
     const numericValues = usable
       .filter((value) => classifyValue(value) === "numeric")
       .map(Number)
@@ -63,52 +51,63 @@ const calculateReplacement = (values, method, customValue) => {
       throw new Error(`${method} requires valid numeric values`);
     }
 
-    if (method === "mean") {
-      return (
-        numericValues.reduce((sum, value) => sum + value, 0) /
-        numericValues.length
-      );
-    }
-
-    return median(numericValues);
+    return method === "mean"
+      ? numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+      : median(numericValues);
   }
 
   throw new Error(`Unsupported replacement method: ${method}`);
 };
 
-const isValidForType = (value, expectedType) => {
-  if (isMissing(value)) return true;
+const isValidForType = (value, expectedType) =>
+  isMissing(value) || classifyValue(value) === expectedType;
 
-  return classifyValue(value) === expectedType;
+const validateStrategy = (strategy, column, allowedMethods) => {
+  if (
+    !strategy ||
+    typeof strategy !== "object" ||
+    !allowedMethods.includes(strategy.method)
+  ) {
+    throw new Error(`Invalid strategy for column "${column}"`);
+  }
+
+  if (
+    strategy.method === "custom" &&
+    (strategy.value === undefined ||
+      strategy.value === null ||
+      String(strategy.value).trim() === "")
+  ) {
+    throw new Error(`Provide a custom replacement value for "${column}"`);
+  }
+
+  if (
+    strategy.excludedRows !== undefined &&
+    (!Array.isArray(strategy.excludedRows) ||
+      strategy.excludedRows.some((row) => !Number.isInteger(Number(row)) || Number(row) < 2))
+  ) {
+    throw new Error(`Invalid excluded row list for "${column}"`);
+  }
 };
 
-const getNextVersionNumber = async (datasetId, owner) => {
-  const latest = await DatasetVersion.findOne({
-    dataset: datasetId,
-    owner
-  }).sort({ versionNumber: -1 });
-
-  return latest ? latest.versionNumber + 1 : 2;
+const validateStrategyColumns = (strategies, columns, allowedMethods) => {
+  for (const [column, strategy] of Object.entries(strategies || {})) {
+    if (!columns.includes(column)) {
+      throw new Error(`Unknown column: ${column}`);
+    }
+    validateStrategy(strategy, column, allowedMethods);
+  }
 };
 
 const createOriginalVersionIfMissing = async (dataset) => {
   const original = await DatasetVersion.findOne({
     dataset: dataset._id,
     owner: dataset.owner,
-    $or: [
-      { isOriginal: true },
-      { versionNumber: 1 }
-    ]
+    $or: [{ isOriginal: true }, { versionNumber: 1 }]
   });
 
   if (original) return original;
 
-  // Compatibility for datasets uploaded before original
-  // snapshots were introduced.
-  const profiling = profileDataset(
-    dataset.records,
-    dataset.columns
-  );
+  const profiling = profileDataset(dataset.records, dataset.columns);
 
   return DatasetVersion.create({
     dataset: dataset._id,
@@ -147,8 +146,7 @@ const applyProfilingToDataset = (dataset, records) => {
   dataset.issueSummary = profiling.issueSummary;
   dataset.outlierSummary = profiling.outlierSummary;
   dataset.mlReadiness = profiling.mlReadiness;
-  dataset.correctionOpportunities =
-    profiling.correctionOpportunities;
+  dataset.correctionOpportunities = profiling.correctionOpportunities;
   dataset.lastAnalysisAt = profiling.analysedAt;
   dataset.status = "cleaned";
 
@@ -161,80 +159,35 @@ const createVersionSnapshot = async (
   previousMlReadinessScore,
   changeSummary
 ) => {
-  const versionNumber = await getNextVersionNumber(
-    dataset._id,
-    dataset.owner
-  );
+  const latest = await DatasetVersion.findOne({
+    dataset: dataset._id,
+    owner: dataset.owner
+  }).sort({ versionNumber: -1 });
 
-  const version = await DatasetVersion.create({
+  const versionNumber = latest ? latest.versionNumber + 1 : 1;
+
+  return DatasetVersion.create({
     dataset: dataset._id,
     owner: dataset.owner,
     versionNumber,
-
     records: dataset.records,
     columns: dataset.columns,
     originalColumns: dataset.originalColumns || dataset.columns,
     archivedColumns: dataset.archivedColumns || [],
-
     rowCount: dataset.rowCount,
     columnCount: dataset.columnCount,
-
     profile: dataset.profile,
-
     qualityScore: dataset.qualityScore,
     previousQualityScore,
-
     qualityMetrics: dataset.qualityMetrics,
     mlReadiness: dataset.mlReadiness,
     previousMlReadinessScore,
-
     issueSummary: dataset.issueSummary,
     outlierSummary: dataset.outlierSummary,
     correctionOpportunities: dataset.correctionOpportunities,
-
     changeSummary,
     isOriginal: false
   });
-
-  return version;
-};
-
-const validateStrategy = (strategy, column, allowedMethods) => {
-  if (
-    !strategy ||
-    typeof strategy !== "object" ||
-    !allowedMethods.includes(strategy.method)
-  ) {
-    throw new Error(`Invalid strategy for column "${column}"`);
-  }
-
-  if (
-    strategy.method === "custom" &&
-    (
-      strategy.value === undefined ||
-      strategy.value === null ||
-      String(strategy.value).trim() === ""
-    )
-  ) {
-    throw new Error(`Provide a custom replacement value for "${column}"`);
-  }
-};
-
-const validateStrategyColumns = (strategies, columns, allowedMethods) => {
-  for (const [column, strategy] of Object.entries(strategies || {})) {
-    if (!columns.includes(column)) {
-      throw new Error(`Unknown column: ${column}`);
-    }
-
-    validateStrategy(strategy, column, allowedMethods);
-    if (
-        allowedMethods.includes("drop_rows") &&
-        strategy.expectedType !== undefined &&
-        !["numeric", "categorical", "boolean", "date"].includes(strategy.expectedType)
-        ) {
-        throw new Error(`Invalid expectedType for column "${column}"`);
-        }
-  }
 };
 
 // --------------------------------------------------
@@ -243,10 +196,7 @@ const validateStrategyColumns = (strategies, columns, allowedMethods) => {
 
 const previewCleaning = async (req, res) => {
   try {
-    const dataset = await findDataset(
-      req.params.id,
-      req.user._id
-    );
+    const dataset = await findDataset(req.params.id, req.user._id);
 
     if (!dataset) {
       return res.status(404).json({
@@ -262,23 +212,19 @@ const previewCleaning = async (req, res) => {
     const missingColumns = [];
     const schemaColumns = [];
     const outlierColumns = [];
-
-    const duplicateIndexes = [];
     const seenRows = new Set();
+    const duplicateRows = [];
 
     columns.forEach((column) => {
-  const values = records.map((record) => record[column]);
-  const nonMissing = values.filter((value) => !isMissing(value));
+      const values = records.map((record) => record[column]);
+      const nonMissing = values.filter((value) => !isMissing(value));
+      const missingCount = values.length - nonMissing.length;
 
-  const missingCount = values.length - nonMissing.length;
+      const profile = dataset.profile?.find(
+        (item) => item.column === column
+      );
 
-  // Retrieve the column profile for all checks below.
-  const profile = dataset.profile?.find(
-    (item) => item.column === column
-  );
-
-  if (missingCount > 0) {
-
+      if (missingCount > 0) {
         const inferredType = profile?.inferredType || "categorical";
 
         const availableStrategies = [
@@ -293,7 +239,7 @@ const previewCleaning = async (req, res) => {
             { value: "median", label: "Median" },
             { value: "mode", label: "Mode" }
           );
-        } else if (inferredType === "categorical") {
+        } else {
           availableStrategies.unshift({
             value: "mode",
             label: "Most frequent value (mode)"
@@ -307,13 +253,11 @@ const previewCleaning = async (req, res) => {
           missingPercentage: round(
             (missingCount / Math.max(records.length, 1)) * 100
           ),
-          suggestedMethod:
-            inferredType === "numeric" ? "median" : "mode",
+          suggestedMethod: inferredType === "numeric" ? "median" : "mode",
           availableStrategies
         });
       }
 
-      // Schema mismatch analysis.
       if (
         profile?.schemaValidation?.status === "mismatch" ||
         profile?.inferredType === "mixed"
@@ -326,7 +270,6 @@ const previewCleaning = async (req, res) => {
         });
       }
 
-      // Outlier detection.
       const outlierDetection = profile?.outlierDetection;
 
       if (outlierDetection?.outlierCount > 0) {
@@ -336,39 +279,35 @@ const previewCleaning = async (req, res) => {
           outlierPercentage: outlierDetection.outlierPercentage,
           lowerBound: outlierDetection.lowerBound,
           upperBound: outlierDetection.upperBound,
-          outliers: outlierDetection.outliers,
+          outliers: outlierDetection.outliers || [],
           suggestedMethod: "median",
           availableStrategies: [
             { value: "mean", label: "Replace with mean" },
             { value: "median", label: "Replace with median" },
             { value: "mode", label: "Replace with mode" },
-            { value: "custom", label: "Replace with custom value" },
+            { value: "custom", label: "Custom value" },
             { value: "drop_rows", label: "Remove affected rows" },
-            { value: "keep", label: "Keep outliers unchanged" }
+            { value: "keep", label: "Keep unchanged" }
           ]
         });
       }
 
       values.forEach((value, index) => {
         if (isMissing(value)) {
-          missingCells.push({
-            row: index + 2,
-            column
-          });
+          missingCells.push({ row: index + 2, column });
         }
       });
     });
 
-    // Duplicate row detection.
     records.forEach((record, index) => {
-      const rowKey = JSON.stringify(
+      const key = JSON.stringify(
         columns.map((column) => record[column] ?? null)
       );
 
-      if (seenRows.has(rowKey)) {
-        duplicateIndexes.push(index);
+      if (seenRows.has(key)) {
+        duplicateRows.push(index + 2);
       } else {
-        seenRows.add(rowKey);
+        seenRows.add(key);
       }
     });
 
@@ -380,29 +319,24 @@ const previewCleaning = async (req, res) => {
         datasetName: dataset.name,
         totalRows: records.length,
         totalColumns: columns.length,
-
         missingCells,
         missingColumns,
         schemaColumns,
         outlierColumns,
-
-        duplicateRows: duplicateIndexes.map((index) => index + 2),
-
+        duplicateRows,
         missingValuesFound: missingCells.length,
-        duplicateRowsFound: duplicateIndexes.length,
-
+        duplicateRowsFound: duplicateRows.length,
         totalOutliers: outlierColumns.reduce(
           (total, item) => total + item.outlierCount,
           0
         ),
-
         currentQualityScore: dataset.qualityScore,
         currentMlReadiness: dataset.mlReadiness,
         currentQualityMetrics: dataset.qualityMetrics
       }
     });
   } catch (error) {
-    console.error("Cleaning preview error:", error.message);
+    console.error("Cleaning preview error:", error);
 
     return res.status(500).json({
       success: false,
@@ -410,7 +344,6 @@ const previewCleaning = async (req, res) => {
     });
   }
 };
-
 // --------------------------------------------------
 // APPLY CLEANING
 // --------------------------------------------------
@@ -424,21 +357,23 @@ const applyCleaning = async (req, res) => {
       removeDuplicates = true
     } = req.body;
 
-    if (
-      !columnStrategies ||
-      typeof columnStrategies !== "object" ||
-      Array.isArray(columnStrategies) ||
-      !invalidStrategies ||
-      typeof invalidStrategies !== "object" ||
-      Array.isArray(invalidStrategies) ||
-      !outlierStrategies ||
-      typeof outlierStrategies !== "object" ||
-      Array.isArray(outlierStrategies)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid cleaning strategy configuration"
-      });
+    const strategyGroups = [
+      columnStrategies,
+      invalidStrategies,
+      outlierStrategies
+    ];
+
+    for (const strategies of strategyGroups) {
+      if (
+        !strategies ||
+        typeof strategies !== "object" ||
+        Array.isArray(strategies)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid cleaning strategy configuration"
+        });
+      }
     }
 
     const dataset = await findDataset(
@@ -454,7 +389,7 @@ const applyCleaning = async (req, res) => {
     }
 
     const columns = [...dataset.columns];
-    const records = dataset.records.map((record) => ({ ...record }));
+    const originalRecords = dataset.records.map(record => ({ ...record }));
 
     const replacementMethods = [
       "mean",
@@ -463,48 +398,74 @@ const applyCleaning = async (req, res) => {
       "custom"
     ];
 
-    const missingMethods = [
+    const allowedMethods = [
       ...replacementMethods,
       "keep",
       "drop_rows"
     ];
 
-    const treatmentMethods = [
-      ...replacementMethods,
-      "keep",
-      "drop_rows"
-    ];
-
+    // Validate all strategies.
     try {
       validateStrategyColumns(
         columnStrategies,
         columns,
-        missingMethods
+        allowedMethods
       );
 
       validateStrategyColumns(
         invalidStrategies,
         columns,
-        treatmentMethods
+        allowedMethods
       );
-
-      for (const [column, strategy] of Object.entries(invalidStrategies)) {
-        if (
-            !["numeric", "categorical", "boolean", "date"].includes(
-            strategy.expectedType
-            )
-        ) {
-            throw new Error(
-            `Provide a valid expectedType for invalid values in "${column}"`
-            );
-        }
-        }
 
       validateStrategyColumns(
         outlierStrategies,
         columns,
-        treatmentMethods
+        allowedMethods
       );
+
+      for (const [column, strategy] of Object.entries(invalidStrategies)) {
+        if (
+          !["numeric", "categorical", "boolean", "date"].includes(
+            strategy.expectedType
+          )
+        ) {
+          throw new Error(
+            `Provide a valid expectedType for invalid values in "${column}"`
+          );
+        }
+      }
+
+      for (const [column, strategy] of Object.entries(outlierStrategies)) {
+        for (const key of ["lowerBound", "upperBound"]) {
+          const value = strategy[key];
+
+          if (
+            value !== undefined &&
+            value !== null &&
+            value !== "" &&
+            !Number.isFinite(Number(value))
+          ) {
+            throw new Error(
+              `Invalid ${key} for outlier column "${column}"`
+            );
+          }
+        }
+
+        if (
+          strategy.lowerBound !== undefined &&
+          strategy.lowerBound !== null &&
+          strategy.lowerBound !== "" &&
+          strategy.upperBound !== undefined &&
+          strategy.upperBound !== null &&
+          strategy.upperBound !== "" &&
+          Number(strategy.lowerBound) > Number(strategy.upperBound)
+        ) {
+          throw new Error(
+            `Lower constraint cannot exceed upper constraint for "${column}"`
+          );
+        }
+      }
     } catch (error) {
       return res.status(400).json({
         success: false,
@@ -512,19 +473,19 @@ const applyCleaning = async (req, res) => {
       });
     }
 
-    // ------------------------------------------------
-    // PREPARE REPLACEMENT VALUES
-    // ------------------------------------------------
+    const getExcludedRows = (strategy) =>
+      new Set((strategy.excludedRows || []).map(Number));
 
     const missingReplacements = {};
     const invalidReplacements = {};
     const outlierReplacements = {};
 
+    // Calculate replacement values before modifying records.
     try {
       for (const [column, strategy] of Object.entries(columnStrategies)) {
         if (replacementMethods.includes(strategy.method)) {
           missingReplacements[column] = calculateReplacement(
-            records.map((record) => record[column]),
+            originalRecords.map(record => record[column]),
             strategy.method,
             strategy.value
           );
@@ -533,21 +494,11 @@ const applyCleaning = async (req, res) => {
 
       for (const [column, strategy] of Object.entries(invalidStrategies)) {
         if (replacementMethods.includes(strategy.method)) {
-          const expectedType = strategy.expectedType;
-
-          if (
-            !["numeric", "categorical", "boolean", "date"].includes(expectedType)
-          ) {
-            throw new Error(
-              `Provide an expectedType for invalid values in "${column}"`
-            );
-          }
-
-          const validValues = records
-            .map((record) => record[column])
-            .filter((value) =>
+          const validValues = originalRecords
+            .map(record => record[column])
+            .filter(value =>
               !isMissing(value) &&
-              isValidForType(value, expectedType)
+              isValidForType(value, strategy.expectedType)
             );
 
           invalidReplacements[column] = calculateReplacement(
@@ -560,15 +511,15 @@ const applyCleaning = async (req, res) => {
 
       for (const [column, strategy] of Object.entries(outlierStrategies)) {
         if (replacementMethods.includes(strategy.method)) {
-          const values = records
-            .map((record) => record[column])
-            .filter((value) =>
+          const numericValues = originalRecords
+            .map(record => record[column])
+            .filter(value =>
               !isMissing(value) &&
               classifyValue(value) === "numeric"
             );
 
           outlierReplacements[column] = calculateReplacement(
-            values,
+            numericValues,
             strategy.method,
             strategy.value
           );
@@ -581,29 +532,100 @@ const applyCleaning = async (req, res) => {
       });
     }
 
-    // ------------------------------------------------
-    // IDENTIFY ROWS TO REMOVE
-    // ------------------------------------------------
+    // Detect outlier rows using either custom constraints
+    // or the profiling service's IQR detection.
+    const originalProfile = profileDataset(
+      originalRecords,
+      columns
+    );
 
+    const outlierRowsByColumn = {};
+
+    for (const [column, strategy] of Object.entries(outlierStrategies)) {
+      const profileColumn = originalProfile.columns.find(
+        item => item.column === column
+      );
+
+      const detectedOutliers =
+        profileColumn?.outlierDetection?.outliers || [];
+
+      const lowerBound =
+        strategy.lowerBound === undefined ||
+        strategy.lowerBound === null ||
+        strategy.lowerBound === ""
+          ? null
+          : Number(strategy.lowerBound);
+
+      const upperBound =
+        strategy.upperBound === undefined ||
+        strategy.upperBound === null ||
+        strategy.upperBound === ""
+          ? null
+          : Number(strategy.upperBound);
+
+      const customConstraints =
+        lowerBound !== null || upperBound !== null;
+
+      outlierRowsByColumn[column] = new Set();
+
+      originalRecords.forEach((record, index) => {
+        const rawValue = record[column];
+
+        if (
+          isMissing(rawValue) ||
+          classifyValue(rawValue) !== "numeric"
+        ) {
+          return;
+        }
+
+        const value = Number(rawValue);
+
+        const isOutlier = customConstraints
+          ? (
+              (lowerBound !== null && value < lowerBound) ||
+              (upperBound !== null && value > upperBound)
+            )
+          : detectedOutliers.some(
+              item => item.row === index + 2
+            );
+
+        if (isOutlier) {
+          outlierRowsByColumn[column].add(index);
+        }
+      });
+    }
+
+    // Determine which rows must be removed.
+    // Row numbers include the CSV header, so first data row = 2.
     const rowsToRemove = new Set();
 
-    // Missing-value row removal.
     for (const [column, strategy] of Object.entries(columnStrategies)) {
       if (strategy.method !== "drop_rows") continue;
 
-      records.forEach((record, index) => {
-        if (isMissing(record[column])) {
+      const excluded = getExcludedRows(strategy);
+
+      originalRecords.forEach((record, index) => {
+        const rowNumber = index + 2;
+
+        if (
+          !excluded.has(rowNumber) &&
+          isMissing(record[column])
+        ) {
           rowsToRemove.add(index);
         }
       });
     }
 
-    // Invalid-value row removal.
     for (const [column, strategy] of Object.entries(invalidStrategies)) {
       if (strategy.method !== "drop_rows") continue;
 
-      records.forEach((record, index) => {
+      const excluded = getExcludedRows(strategy);
+
+      originalRecords.forEach((record, index) => {
+        const rowNumber = index + 2;
+
         if (
+          !excluded.has(rowNumber) &&
           !isMissing(record[column]) &&
           !isValidForType(record[column], strategy.expectedType)
         ) {
@@ -612,180 +634,155 @@ const applyCleaning = async (req, res) => {
       });
     }
 
-    // Outlier row removal.
     for (const [column, strategy] of Object.entries(outlierStrategies)) {
       if (strategy.method !== "drop_rows") continue;
 
-      const profile = profileDataset(records, columns);
-      const columnProfile = profile.columns.find(
-        (item) => item.column === column
-      );
+      const excluded = getExcludedRows(strategy);
 
-      const outlierRows = new Set(
-        (columnProfile?.outlierDetection?.outliers || [])
-          .map((item) => item.row - 2)
-      );
-
-      outlierRows.forEach((index) => rowsToRemove.add(index));
+      outlierRowsByColumn[column].forEach(index => {
+        if (!excluded.has(index + 2)) {
+          rowsToRemove.add(index);
+        }
+      });
     }
-
-    // ------------------------------------------------
-    // APPLY REPLACEMENTS
-    // ------------------------------------------------
 
     let missingValuesFilled = 0;
     let invalidValuesReplaced = 0;
     let outliersReplaced = 0;
 
-    const finalRecords = [];
+    // Keep original row indexes so exclusions remain accurate
+    // even when other rows are removed.
+    const indexedRecords = originalRecords
+      .map((record, index) => ({
+        record: { ...record },
+        originalIndex: index
+      }))
+      .filter(item => !rowsToRemove.has(item.originalIndex));
 
-    records.forEach((originalRecord, index) => {
-      if (rowsToRemove.has(index)) return;
+    // Apply missing-value and invalid-value treatments.
+    indexedRecords.forEach(item => {
+      const rowNumber = item.originalIndex + 2;
+      const record = item.record;
 
-      const record = { ...originalRecord };
-
-      // Missing values.
       for (const [column, strategy] of Object.entries(columnStrategies)) {
         if (
-          !isMissing(record[column]) ||
-          !replacementMethods.includes(strategy.method)
+          strategy.method === "keep" ||
+          strategy.method === "drop_rows"
         ) {
           continue;
         }
 
-        record[column] = missingReplacements[column];
-        missingValuesFilled++;
+        const excluded = getExcludedRows(strategy);
+
+        if (
+          isMissing(record[column]) &&
+          !excluded.has(rowNumber)
+        ) {
+          record[column] = missingReplacements[column];
+          missingValuesFilled++;
+        }
       }
 
-      // Invalid non-empty values.
       for (const [column, strategy] of Object.entries(invalidStrategies)) {
         if (
-          isMissing(record[column]) ||
-          !replacementMethods.includes(strategy.method) ||
-          isValidForType(record[column], strategy.expectedType)
+          strategy.method === "keep" ||
+          strategy.method === "drop_rows"
         ) {
           continue;
         }
 
-        record[column] = invalidReplacements[column];
-        invalidValuesReplaced++;
-      }
+        const excluded = getExcludedRows(strategy);
 
-      finalRecords.push(record);
+        if (
+          !excluded.has(rowNumber) &&
+          !isMissing(record[column]) &&
+          !isValidForType(record[column], strategy.expectedType)
+        ) {
+          record[column] = invalidReplacements[column];
+          invalidValuesReplaced++;
+        }
+      }
     });
 
-    // Outliers are processed after missing/invalid-value treatment.
-    // Their row indexes are based on the original records.
-    const outlierDropIndexes = new Set();
-
+    // Apply outlier treatments independently per column.
     for (const [column, strategy] of Object.entries(outlierStrategies)) {
-      if (strategy.method === "drop_rows") {
-        const profile = profileDataset(records, columns);
-        const columnProfile = profile.columns.find(
-          (item) => item.column === column
-        );
-
-        (columnProfile?.outlierDetection?.outliers || []).forEach(
-          (item) => outlierDropIndexes.add(item.row - 2)
-        );
+      if (!replacementMethods.includes(strategy.method)) {
+        continue;
       }
-    }
 
-    let processedRecords = finalRecords;
+      const excluded = getExcludedRows(strategy);
+      const outlierIndexes = outlierRowsByColumn[column];
 
-    for (const [column, strategy] of Object.entries(outlierStrategies)) {
-      if (!replacementMethods.includes(strategy.method)) continue;
+      indexedRecords.forEach(item => {
+        const rowNumber = item.originalIndex + 2;
 
-      // Recalculate outlier indexes against the records that
-      // remain after missing and invalid row removal.
-      const currentProfile = profileDataset(processedRecords, columns);
-      const columnProfile = currentProfile.columns.find(
-        (item) => item.column === column
-      );
+        if (
+          !outlierIndexes.has(item.originalIndex) ||
+          excluded.has(rowNumber)
+        ) {
+          return;
+        }
 
-      const outlierRows = new Set(
-        (columnProfile?.outlierDetection?.outliers || [])
-          .map((item) => item.row - 2)
-      );
-
-      processedRecords = processedRecords.map((record, index) => {
-        if (!outlierRows.has(index)) return record;
-
+        item.record[column] = outlierReplacements[column];
         outliersReplaced++;
-
-        return {
-          ...record,
-          [column]: outlierReplacements[column]
-        };
       });
     }
 
-    // ------------------------------------------------
-    // DUPLICATE REMOVAL
-    // ------------------------------------------------
+    let processedRecords = indexedRecords.map(
+      item => item.record
+    );
 
+    // Remove duplicate rows if requested.
     let duplicateRowsRemoved = 0;
 
     if (removeDuplicates !== false) {
-      const seenRows = new Set();
+      const seen = new Set();
 
-      processedRecords = processedRecords.filter((record) => {
+      processedRecords = processedRecords.filter(record => {
         const key = JSON.stringify(
-          columns.map((column) => record[column] ?? null)
+          columns.map(column => record[column] ?? null)
         );
 
-        if (seenRows.has(key)) {
+        if (seen.has(key)) {
           duplicateRowsRemoved++;
           return false;
         }
 
-        seenRows.add(key);
+        seen.add(key);
         return true;
       });
     }
 
-    const rowsRemoved = records.length - finalRecords.length;
+    const rowsRemoved = rowsToRemove.size;
 
     if (
-      !missingValuesFilled &&
-      !invalidValuesReplaced &&
-      !outliersReplaced &&
-      !duplicateRowsRemoved &&
-      !rowsRemoved
+      missingValuesFilled === 0 &&
+      invalidValuesReplaced === 0 &&
+      outliersReplaced === 0 &&
+      duplicateRowsRemoved === 0 &&
+      rowsRemoved === 0
     ) {
       return res.status(400).json({
         success: false,
-        message: "No changes were made. Check the selected strategies."
+        message: "No changes were made. Check the selected strategies and excluded rows."
       });
     }
 
-    // ------------------------------------------------
-    // RECALCULATE PROFILING AND SCORES
-    // ------------------------------------------------
-
     const previousQualityScore = dataset.qualityScore;
     const previousMlReadinessScore =
-    dataset.mlReadiness?.score ?? null;
+      dataset.mlReadiness?.score ?? null;
 
-    // Preserve the pre-cleaning state before modifying the dataset.
+    // Preserve the pre-cleaning state before changing the dataset.
     await createOriginalVersionIfMissing(dataset);
 
-    const profiling = applyProfilingToDataset(
-    dataset,
-    processedRecords
-    );
+    applyProfilingToDataset(dataset, processedRecords);
 
     const strategySummary = [
       ...Object.entries(columnStrategies).map(([column, strategy]) => ({
         column,
         target: "missing",
         method: strategy.method,
-        ...(strategy.method === "custom"
-          ? { value: strategy.value }
-          : {}),
-        ...(missingReplacements[column] !== undefined
-          ? { replacementValue: missingReplacements[column] }
-          : {})
+        excludedRows: strategy.excludedRows || []
       })),
 
       ...Object.entries(invalidStrategies).map(([column, strategy]) => ({
@@ -793,24 +790,16 @@ const applyCleaning = async (req, res) => {
         target: "invalid",
         expectedType: strategy.expectedType,
         method: strategy.method,
-        ...(strategy.method === "custom"
-          ? { value: strategy.value }
-          : {}),
-        ...(invalidReplacements[column] !== undefined
-          ? { replacementValue: invalidReplacements[column] }
-          : {})
+        excludedRows: strategy.excludedRows || []
       })),
 
       ...Object.entries(outlierStrategies).map(([column, strategy]) => ({
         column,
         target: "outlier",
         method: strategy.method,
-        ...(strategy.method === "custom"
-          ? { value: strategy.value }
-          : {}),
-        ...(outlierReplacements[column] !== undefined
-          ? { replacementValue: outlierReplacements[column] }
-          : {})
+        lowerBound: strategy.lowerBound ?? null,
+        upperBound: strategy.upperBound ?? null,
+        excludedRows: strategy.excludedRows || []
       }))
     ];
 
@@ -836,6 +825,7 @@ const applyCleaning = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Cleaning applied and new dataset version created",
+
       version: {
         id: newVersion._id,
         versionNumber: newVersion.versionNumber,
@@ -849,6 +839,7 @@ const applyCleaning = async (req, res) => {
         changeSummary: newVersion.changeSummary,
         createdAt: newVersion.createdAt
       },
+
       dataset: {
         id: dataset._id,
         rowCount: dataset.rowCount,
@@ -925,7 +916,8 @@ const exportDataset = async (req, res) => {
       filename = `${dataset.name}-version-${versionNumber}.csv`;
     }
 
-    const safeRecords = records.map((record) => {
+    // Protect exported CSV files against formula injection.
+    const safeRecords = records.map(record => {
       const safeRecord = {};
 
       for (const column of columns) {
@@ -951,7 +943,7 @@ const exportDataset = async (req, res) => {
 
     return res.status(200).send(csv);
   } catch (error) {
-    console.error("Dataset export error:", error.message);
+    console.error("Dataset export error:", error);
 
     return res.status(500).json({
       success: false,
@@ -959,6 +951,7 @@ const exportDataset = async (req, res) => {
     });
   }
 };
+
 
 // --------------------------------------------------
 // GET VERSION HISTORY
@@ -987,33 +980,41 @@ const getDatasetVersions = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+
       dataset: {
         id: dataset._id,
         name: dataset.name
       },
+
       count: versions.length,
-      versions: versions.map((version) => ({
+
+      versions: versions.map(version => ({
         id: version._id,
         versionNumber: version.versionNumber,
+
         label: version.isOriginal
           ? "Original"
           : `Version ${version.versionNumber}`,
+
         isOriginal: version.isOriginal,
         rowCount: version.rowCount,
         columnCount: version.columnCount,
         columns: version.columns,
+
         qualityScore: version.qualityScore,
         previousQualityScore: version.previousQualityScore,
         qualityMetrics: version.qualityMetrics,
         mlReadiness: version.mlReadiness,
+
         issueSummary: version.issueSummary,
         outlierSummary: version.outlierSummary,
         changeSummary: version.changeSummary,
+
         createdAt: version.createdAt
       }))
     });
   } catch (error) {
-    console.error("Version history error:", error.message);
+    console.error("Version history error:", error);
 
     return res.status(500).json({
       success: false,
@@ -1021,6 +1022,7 @@ const getDatasetVersions = async (req, res) => {
     });
   }
 };
+
 
 // --------------------------------------------------
 // DELETE A VERSION (EXCEPT ORIGINAL)
@@ -1064,8 +1066,8 @@ const deleteDatasetVersion = async (req, res) => {
       _id: version._id
     });
 
-    // Temporarily move remaining numbers to negative values
-    // to avoid collisions with the unique version index.
+    // Temporarily use negative version numbers to avoid
+    // collisions with the unique version-number index.
     const remaining = await DatasetVersion.find({
       dataset: dataset._id,
       owner: req.user._id
@@ -1078,6 +1080,7 @@ const deleteDatasetVersion = async (req, res) => {
       );
     }
 
+    // Restore sequential positive version numbers.
     for (let index = 0; index < remaining.length; index++) {
       await DatasetVersion.updateOne(
         { _id: remaining[index]._id },
@@ -1085,6 +1088,7 @@ const deleteDatasetVersion = async (req, res) => {
       );
     }
 
+    // Restore the dataset from the latest remaining version.
     const latestVersion = await DatasetVersion.findOne({
       dataset: dataset._id,
       owner: req.user._id
@@ -1094,22 +1098,28 @@ const deleteDatasetVersion = async (req, res) => {
 
     if (latestVersion) {
       dataset.records = latestVersion.records;
+
       dataset.columns = latestVersion.columns?.length
         ? latestVersion.columns
         : dataset.columns;
+
       dataset.originalColumns =
         latestVersion.originalColumns || dataset.originalColumns;
+
       dataset.archivedColumns =
         latestVersion.archivedColumns || [];
 
       dataset.rowCount = latestVersion.rowCount;
       dataset.columnCount = latestVersion.columnCount;
       dataset.profile = latestVersion.profile || [];
+
       dataset.qualityScore = latestVersion.qualityScore;
       dataset.qualityMetrics = latestVersion.qualityMetrics;
       dataset.mlReadiness = latestVersion.mlReadiness;
+
       dataset.issueSummary = latestVersion.issueSummary;
       dataset.outlierSummary = latestVersion.outlierSummary;
+
       dataset.correctionOpportunities =
         latestVersion.correctionOpportunities;
 
@@ -1127,7 +1137,7 @@ const deleteDatasetVersion = async (req, res) => {
       remainingVersions: remaining.length
     });
   } catch (error) {
-    console.error("Version deletion error:", error.message);
+    console.error("Version deletion error:", error);
 
     return res.status(500).json({
       success: false,
@@ -1135,6 +1145,11 @@ const deleteDatasetVersion = async (req, res) => {
     });
   }
 };
+
+
+// --------------------------------------------------
+// EXPORT CONTROLLERS
+// --------------------------------------------------
 
 module.exports = {
   previewCleaning,
