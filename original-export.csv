@@ -1,0 +1,6 @@
+CustomerID,Name,Email,Age,City
+1,Alice,alice@example.com,25,Dublin
+2,Bob,,30,Cork
+3,Charlie,charlie@example.com,,Galway
+4,Alice,alice@example.com,25,Dublin
+5,David,david@example.com,28,"Limerick"
