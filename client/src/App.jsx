@@ -44,6 +44,7 @@ function App() {
   const [datasets, setDatasets] = useState([]);
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [cleaningPreview, setCleaningPreview] = useState(null);
+  const [versions, setVersions] = useState([]);
   const [replacement, setReplacement] = useState("Not provided");
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -208,23 +209,30 @@ function App() {
     }
   }
 
+
   async function openCleaningPreview(dataset) {
     setSelectedDataset(dataset);
     setCleaningPreview(null);
+    setVersions([]);
     setError("");
     setMessage("");
 
     try {
-      const response = await apiRequest(
-        `/api/datasets/${dataset._id}/cleaning-preview`
-      );
+      const [previewResponse, versionsResponse] = await Promise.all([
+        apiRequest(`/api/datasets/${dataset._id}/cleaning-preview`),
+        apiRequest(`/api/datasets/${dataset._id}/versions`)
+      ]);
 
-      const data = await response.json();
-      setCleaningPreview(data.preview);
+      const previewData = await previewResponse.json();
+      const versionsData = await versionsResponse.json();
+
+      setCleaningPreview(previewData.preview);
+      setVersions(versionsData.versions || []);
     } catch (err) {
       setError(err.message);
     }
   }
+
 
   async function applyCleaning() {
     if (!selectedDataset) return;
@@ -253,8 +261,21 @@ function App() {
         `Cleaning complete. Version ${data.version.versionNumber} created.`
       );
 
-      setCleaningPreview(null);
       await loadDatasets();
+
+      const versionsResponse = await apiRequest(
+        `/api/datasets/${selectedDataset._id}/versions`
+      );
+      const versionsData = await versionsResponse.json();
+
+      setVersions(versionsData.versions || []);
+
+      const previewResponse = await apiRequest(
+        `/api/datasets/${selectedDataset._id}/cleaning-preview`
+      );
+      const previewData = await previewResponse.json();
+
+      setCleaningPreview(previewData.preview);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -756,13 +777,60 @@ function App() {
               >
                 <Download size={16} /> Download original
               </button>
-              <button
-                className="secondary-button"
-                onClick={() => exportDataset(selectedDataset, 2)}
-              >
-                <Download size={16} /> Download Version 2
-              </button>
+               {versions
+              .filter(version => version.versionNumber > 1)
+              .map(version => (
+                <button
+                  key={version.versionNumber}
+                  className="secondary-button"
+                  onClick={() =>
+                    exportDataset(selectedDataset, version.versionNumber)
+                  }
+                >
+                  <Download size={16} />
+                  Download V{version.versionNumber}
+                </button>
+              ))}
             </div>
+
+            
+            <div className="version-history">
+              <h3>Version history</h3>
+              <p>Track changes made to this dataset.</p>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>VERSION</th>
+                      <th>ROWS</th>
+                      <th>QUALITY SCORE</th>
+                      <th>MISSING VALUES FILLED</th>
+                      <th>DUPLICATES REMOVED</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {versions.map(version => (
+                      <tr key={version.versionNumber}>
+                        <td>
+                          <strong>{version.label}</strong>
+                          {version.versionNumber === 1 && (
+                            <span className="status-pill good">Original</span>
+                          )}
+                        </td>
+                        <td>{version.rowCount ?? "—"}</td>
+                        <td>
+                          <strong>{version.qualityScore}%</strong>
+                        </td>
+                        <td>{version.changeSummary?.missingValuesFilled || 0}</td>
+                        <td>{version.changeSummary?.duplicateRowsRemoved || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
 
             {cleaningPreview ? (
               <>

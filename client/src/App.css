@@ -443,3 +443,23 @@ tbody tr:last-child td { border-bottom: 0; }
     flex-direction: column;
   }
 }
+
+
+.version-history {
+  margin: 24px 0;
+}
+
+.version-history h3 {
+  margin-bottom: 6px;
+  font-size: 17px;
+}
+
+.version-history > p {
+  margin-bottom: 16px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.version-history .status-pill {
+  margin-left: 8px;
+}

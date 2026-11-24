@@ -292,8 +292,74 @@ const previewCleaning = async (req, res) => {
   }
 };
 
+
+const getDatasetVersions = async (req, res) => {
+  try {
+    const dataset = await Dataset.findOne({
+      _id: req.params.id,
+      owner: req.user._id
+    }).select("_id name rowCount qualityScore issueSummary createdAt");
+
+    if (!dataset) {
+      return res.status(404).json({
+        success: false,
+        message: "Dataset not found"
+      });
+    }
+
+    const versions = await DatasetVersion.find({
+    dataset: dataset._id,
+    owner: req.user._id
+    })
+    .select("+records")
+    .sort({ versionNumber: 1 });
+
+    const history = [
+      {
+        versionNumber: 1,
+        label: "Original",
+        rowCount: dataset.rowCount,
+        qualityScore: dataset.qualityScore,
+        changeSummary: {
+          missingValuesFilled: 0,
+          duplicateRowsRemoved: 0
+        },
+        createdAt: dataset.createdAt
+      },
+      ...versions.map(version => ({
+        id: version._id,
+        versionNumber: version.versionNumber,
+        label: `Version ${version.versionNumber}`,
+        rowCount: version.records.length,
+        qualityScore: version.qualityScore,
+        changeSummary: version.changeSummary,
+        createdAt: version.createdAt
+      }))
+    ];
+
+    return res.status(200).json({
+      success: true,
+      dataset: {
+        id: dataset._id,
+        name: dataset.name
+      },
+      count: history.length,
+      versions: history
+    });
+  } catch (error) {
+    console.error("Version history error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve dataset versions"
+    });
+  }
+};
+
+
 module.exports = {
   previewCleaning,
   applyCleaning,
-  exportDataset
+  exportDataset,
+  getDatasetVersions
 };

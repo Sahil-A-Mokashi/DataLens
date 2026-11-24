@@ -3,7 +3,8 @@ const express = require("express");
 const {
   previewCleaning,
   applyCleaning,
-  exportDataset
+  exportDataset,
+  getDatasetVersions
 } = require("../controllers/cleaningController");
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.get("/", getDatasets);
 router.get("/:id/cleaning-preview", previewCleaning);
 router.post("/:id/clean", applyCleaning);
 router.get("/:id/export", exportDataset);
+router.get("/:id/versions", getDatasetVersions);
 router.get("/:id", getDatasetById);
 
 module.exports = router;
