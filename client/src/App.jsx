@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -46,6 +46,7 @@ function App() {
   const [cleaningPreview, setCleaningPreview] = useState(null);
   const [versions, setVersions] = useState([]);
   const [replacement, setReplacement] = useState("Not provided");
+  const cleaningPanelRef = useRef(null);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -115,6 +116,17 @@ function App() {
       loadDatasets();
     }
   }, [token]);
+
+useEffect(() => {
+  if (selectedDataset) {
+    requestAnimationFrame(() => {
+      cleaningPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    });
+  }
+}, [selectedDataset]);
 
   async function handleAuth(event) {
     event.preventDefault();
@@ -904,7 +916,10 @@ async function searchOpenData(event) {
 
 
         {selectedDataset && (
-          <section className="panel cleaning-panel">
+          <section
+            ref={cleaningPanelRef}
+            className="panel cleaning-panel"
+          >
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">DATASET REVIEW</p>

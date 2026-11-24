@@ -619,3 +619,6 @@ tbody tr:last-child td { border-bottom: 0; }
     flex-direction: column;
   }
 }
+.cleaning-panel {
+  scroll-margin-top: 24px;
+}
