@@ -1157,3 +1157,209 @@ tbody tr:last-child td { border-bottom: 0; }
   .footer { flex-direction:column; }
   .table-actions { flex-direction:column; align-items:flex-start; gap:3px; }
 }
+
+
+/* DataLens UI polish: filters, tables, schema mismatch detail and task activity */
+.dataset-filters {
+  display:grid; grid-template-columns:minmax(145px,1.15fr) minmax(145px,1fr) minmax(145px,1fr) minmax(145px,1fr) auto;
+  align-items:end; gap:12px; margin:16px 0 18px; padding:15px;
+  border:1px solid #e7ecf3; border-radius:12px; background:#f8fafd;
+}
+.dataset-filters label { display:flex; flex-direction:column; gap:7px; min-width:0; color:#596579; font-size:12px; font-weight:600; }
+.dataset-filters input,.dataset-filters select {
+  width:100%; min-width:0; height:41px; padding:0 11px; border:1px solid #d9e1ec;
+  border-radius:8px; background:#fff; color:#27364b; font:inherit; font-size:13px; outline:none;
+  transition:border-color .15s ease,box-shadow .15s ease;
+}
+.dataset-filters input:focus,.dataset-filters select:focus { border-color:#6b9ce8; box-shadow:0 0 0 3px rgba(59,130,246,.11); }
+.dataset-pagination,.pagination-controls,.schema-mismatch-pagination { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.dataset-pagination { margin-top:16px; padding:12px 14px; border:1px solid #e8edf4; border-radius:10px; background:#fafbfd; color:#687588; font-size:12px; }
+.pagination-controls { gap:7px; }
+.pagination-controls button,.schema-mismatch-pagination button { min-height:34px; padding:6px 11px; border:1px solid #dce4ee; border-radius:7px; background:#fff; color:#344054; font-size:12px; cursor:pointer; }
+.pagination-controls button:disabled,.schema-mismatch-pagination button:disabled { opacity:.42; cursor:not-allowed; }
+.table-wrap { width:100%; overflow:auto; border:1px solid #e7ecf2; border-radius:10px; background:#fff; }
+.table-wrap table { width:100%; border-collapse:separate; border-spacing:0; font-size:12px; }
+.table-wrap thead th { position:sticky; top:0; z-index:1; padding:11px 13px; background:#f4f7fb; color:#647187; border-bottom:1px solid #e5eaf1; text-align:left; font-size:10px; font-weight:700; letter-spacing:.055em; white-space:nowrap; }
+.table-wrap tbody td { padding:11px 13px; color:#344054; border-bottom:1px solid #edf0f4; vertical-align:top; line-height:1.45; }
+.table-wrap tbody tr:last-child td { border-bottom:0; }
+.table-wrap tbody tr:hover { background:#f8faff; }
+.schema-mismatch-review { margin-top:13px; padding:12px; border:1px solid #e8edf4; border-radius:10px; background:#fbfcfe; }
+.schema-mismatch-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+.schema-mismatch-heading > div { display:flex; flex-direction:column; gap:3px; }
+.schema-mismatch-heading strong { color:#344054; font-size:12px; }
+.schema-mismatch-heading span,.schema-page-size { color:#7b8797; font-size:11px; }
+.schema-full-row-table { max-height:390px; }
+.schema-full-row-table table { min-width:760px; }
+.schema-full-row-table .schema-invalid-value { color:#b42318; font-weight:700; background:#fff7f5; }
+.schema-mismatch-pagination { padding-top:11px; color:#667085; font-size:11px; }
+.schema-mismatch-pagination > div { display:flex; gap:7px; }
+.activity-tray {
+  position:fixed; right:22px; bottom:18px; z-index:1000; width:min(360px,calc(100vw - 28px));
+  max-height:310px; overflow:auto; padding:13px 14px; border:1px solid #dfe6ef; border-radius:13px;
+  background:rgba(255,255,255,.97); box-shadow:0 10px 35px rgba(25,42,70,.16); backdrop-filter:blur(12px);
+}
+.activity-tray-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; padding-bottom:9px; border-bottom:1px solid #edf0f4; }
+.activity-tray-heading strong { color:#263247; font-size:13px; }
+.activity-tray-heading span { color:#8792a2; font-size:10px; }
+.activity-task-list { display:flex; flex-direction:column; }
+.activity-task { padding:10px 0; border-bottom:1px solid #f0f2f5; }
+.activity-task:last-child { border-bottom:0; padding-bottom:1px; }
+.activity-task-top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.activity-task-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#475467; font-size:11px; font-weight:600; }
+.activity-task-percent { color:#3978df; font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
+.activity-task-done,.activity-task-error { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; font-size:10px; font-weight:700; }
+.activity-task-done { color:#15945b; }
+.activity-task-error { color:#c0392b; }
+.activity-progress-track { height:5px; margin-top:8px; overflow:hidden; border-radius:99px; background:#e9eef5; }
+.activity-progress-track > div { height:100%; border-radius:inherit; background:linear-gradient(90deg,#4b83df,#2c9b70); transition:width .25s ease; }
+.activity-error-detail { display:block; margin-top:5px; color:#b42318; font-size:10px; overflow-wrap:anywhere; }
+@media (max-width:850px) { .dataset-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:600px) {
+  .dataset-filters { grid-template-columns:1fr; padding:12px; }
+  .activity-tray { right:10px; bottom:10px; width:min(340px,calc(100vw - 20px)); }
+  .schema-mismatch-heading { align-items:flex-start; flex-direction:column; }
+}
+
+/* =====================================================
+   DATAlens — FULL-WIDTH ISSUE EXPLORER
+   ===================================================== */
+
+.cleaning-panel,
+.column-cleaning-section {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.issue-workspace {
+  display: grid !important;
+  grid-template-columns: minmax(230px, 25%) minmax(0, 1fr) !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.issue-column-list {
+  min-width: 0;
+  width: 100%;
+}
+
+.issue-detail-panel {
+  display: block;
+  width: 100% !important;
+  min-width: 0;
+  max-width: none !important;
+  box-sizing: border-box;
+  padding: 18px;
+}
+
+.issue-detail-heading {
+  width: 100%;
+}
+
+.issue-controls {
+  width: 100%;
+}
+
+.issue-rows-table,
+.schema-mismatch-review,
+.table-wrap {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.issue-rows-table table {
+  width: max-content;
+  min-width: 100%;
+}
+
+/* =====================================================
+   DATASET TABLE — CONTROLLED HEIGHT
+   ===================================================== */
+
+.datasets-panel {
+  min-width: 0;
+}
+
+.datasets-panel > .table-wrap {
+  width: 100%;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid #e5eaf1;
+  border-radius: 10px;
+}
+
+.datasets-panel > .table-wrap table {
+  width: 100%;
+  min-width: 760px;
+}
+
+.datasets-panel > .table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f4f7fb;
+}
+
+.datasets-panel > .table-wrap tbody tr {
+  height: 62px;
+}
+
+.datasets-panel .table-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.datasets-panel .table-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.datasets-panel .table-actions button:hover {
+  background: #eff5ff;
+  border-color: #9bbcf0;
+}
+
+/* Dataset pagination remains visible below the table */
+.datasets-panel .dataset-pagination {
+  position: relative;
+  margin-top: 12px;
+}
+
+/* =====================================================
+   RESPONSIVE
+   ===================================================== */
+
+@media (max-width: 900px) {
+  .issue-workspace {
+    grid-template-columns: 1fr !important;
+  }
+
+  .issue-column-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .issue-column-button {
+    flex: 1 1 150px;
+  }
+
+  .datasets-panel > .table-wrap {
+    max-height: 300px;
+  }
+}

@@ -1102,3 +1102,149 @@ tbody tr:last-child td { border-bottom: 0; }
     padding: 14px;
   }
 }
+
+
+/* DataLens refinement: column tools, issue review and professional footer */
+.table-actions { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+.danger-text { color:#b42318 !important; }
+.danger-text:hover { color:#8f1d16 !important; }
+.schema-manager { margin:18px 0 22px; padding:16px; border:1px solid #e5eaf1; border-radius:12px; background:#fbfcfe; }
+.schema-manager-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.schema-manager-heading h3 { margin:0 0 5px; font-size:15px; }
+.schema-manager-heading p,.muted-copy { color:#718096; font-size:12px; margin:0; }
+.schema-add-form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:end; margin:16px 0; padding:14px; background:#fff; border:1px solid #e8edf3; border-radius:10px; }
+.schema-add-form label,.issue-controls label { display:flex; flex-direction:column; gap:6px; color:#586579; font-size:12px; font-weight:600; min-width:0; }
+.schema-add-form input,.schema-add-form select,.schema-column-management-row input,.issue-controls input,.issue-controls select { width:100%; min-width:0; min-height:38px; padding:8px 10px; border:1px solid #dce3ec; border-radius:8px; background:#fff; color:#263247; font:inherit; }
+.schema-formula-field { grid-column:span 2; }
+.schema-formula-field small { color:#7b8797; font-weight:400; }
+.schema-column-management-list { display:flex; flex-direction:column; gap:8px; }
+.schema-column-management-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(130px,1.2fr) auto auto; gap:8px; align-items:center; padding:9px 10px; border:1px solid #e9edf3; border-radius:9px; background:#fff; }
+.schema-column-management-row strong,.schema-column-management-row span { overflow-wrap:anywhere; font-size:13px; }
+.archived-columns { display:flex; flex-direction:column; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid #e8edf3; }
+.archived-columns > strong { font-size:12px; color:#596579; }
+.issue-workspace { display:grid; grid-template-columns:minmax(150px,210px) minmax(0,1fr); gap:14px; margin-top:14px; align-items:start; }
+.issue-column-list { display:flex; flex-direction:column; gap:7px; }
+.issue-column-button { display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; padding:11px 12px; text-align:left; border:1px solid #e2e8f0; border-radius:9px; background:#fff; cursor:pointer; color:#344054; }
+.issue-column-button strong { font-size:13px; overflow-wrap:anywhere; }
+.issue-column-button span { color:#7b8797; font-size:11px; white-space:nowrap; }
+.issue-column-button.active { border-color:#7ba7ee; background:#eff6ff; box-shadow:0 0 0 2px rgba(59,130,246,.08); }
+.issue-detail-panel { min-width:0; padding:14px; border:1px solid #e5eaf1; border-radius:11px; background:#fff; }
+.issue-detail-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.issue-detail-heading h4 { margin:0 0 4px; font-size:15px; }
+.issue-detail-heading p { margin:0; color:#7b8797; font-size:12px; }
+.inline-check { display:flex; align-items:center; gap:7px; color:#596579; font-size:12px; white-space:nowrap; }
+.inline-check input { accent-color:#3978df; }
+.issue-controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-bottom:12px; }
+.issue-rows-table { max-height:330px; overflow:auto; border:1px solid #edf0f4; border-radius:8px; }
+.issue-rows-table table { width:100%; border-collapse:collapse; font-size:12px; }
+.issue-rows-table th { position:sticky; top:0; z-index:1; background:#f5f7fa; color:#667085; text-align:left; padding:9px; }
+.issue-rows-table td { padding:8px 9px; border-top:1px solid #edf0f4; overflow-wrap:anywhere; }
+.issue-highlight-row { background:#fff4c2 !important; }
+.issue-highlight-row:hover { background:#ffed9b !important; }
+.issue-rows-table input[type="checkbox"] { accent-color:#3978df; width:15px; height:15px; }
+.footer { display:flex; justify-content:space-between; gap:12px; padding:20px 0 14px; margin-top:30px; border-top:1px solid #e8edf3; color:#7b8797; font-size:12px; letter-spacing:.01em; }
+@media (max-width:900px) {
+  .schema-add-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .issue-workspace { grid-template-columns:1fr; }
+  .issue-column-list { flex-direction:row; flex-wrap:wrap; }
+  .issue-column-button { width:auto; min-width:135px; }
+}
+@media (max-width:600px) {
+  .schema-add-form { grid-template-columns:1fr; }
+  .schema-formula-field { grid-column:auto; }
+  .schema-column-management-row { grid-template-columns:1fr 1fr; }
+  .schema-manager-heading,.issue-detail-heading { align-items:flex-start; flex-direction:column; }
+  .footer { flex-direction:column; }
+  .table-actions { flex-direction:column; align-items:flex-start; gap:3px; }
+}
+
+/* Wider and more readable tables throughout DataLens */
+.table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 10px;
+}
+
+.table-wrap table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.table-wrap th {
+  padding: 13px 16px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: #f5f7fb;
+}
+
+.table-wrap td {
+  padding: 13px 16px;
+  font-size: 12px;
+  min-width: 90px;
+}
+
+/* Issue explorer layout */
+.issue-workspace {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  width: 100%;
+}
+
+.issue-detail-panel {
+  width: 100%;
+  min-width: 0;
+}
+
+.issue-rows-table {
+  width: 100%;
+  max-width: 100%;
+  max-height: 430px;
+  overflow: auto;
+  border: 1px solid #e5eaf1;
+  border-radius: 10px;
+}
+
+.issue-rows-table table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.issue-rows-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f1f5fa;
+}
+
+.issue-rows-table td,
+.issue-rows-table th {
+  padding: 12px 15px;
+  white-space: nowrap;
+}
+
+/* Highlight the actual problematic cell */
+.problem-cell,
+.missing-cell-highlight {
+  background: #fff0b8 !important;
+  color: #8a5a00 !important;
+  font-weight: 700;
+}
+
+.issue-highlight-row {
+  background: #fff9e8 !important;
+}
+
+.issue-highlight-row:hover {
+  background: #fff1c9 !important;
+}
+
+/* Responsive issue explorer */
+@media (max-width: 900px) {
+  .issue-workspace {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,7 +1,8 @@
 
 const {
   profileDataset,
-  validateColumnSchema
+  classifyValue,
+  isMissing
 } = require("../services/profilingService");
 
 const multer = require("multer");
@@ -50,14 +51,15 @@ const createVersionSnapshot = async (
   changeSummary = {}
 ) => {
   const latest = await DatasetVersion.findOne({
-    dataset: dataset._id
+    dataset: dataset._id,
+    owner: dataset.owner
   }).sort({ versionNumber: -1 });
 
   const versionNumber = latest
     ? latest.versionNumber + 1
     : 1;
 
-  const version = await DatasetVersion.create({
+  return DatasetVersion.create({
     dataset: dataset._id,
     owner: dataset.owner,
     versionNumber,
@@ -95,8 +97,6 @@ const createVersionSnapshot = async (
 
     isOriginal: false
   });
-
-  return version;
 };
 
 const findOwnedDataset = async (id, owner) => {
@@ -136,22 +136,88 @@ const validateColumnName = (name) => {
   );
 };
 
-// Safe arithmetic formula parser.
-// Supported: column names, numbers, +, -, *, / and parentheses.
-// Does not use eval() or execute JavaScript.
+// --------------------------------------------------
+// SCHEMA VALIDATION HELPER
+// --------------------------------------------------
+
+const validateValuesAgainstType = (
+  values,
+  expectedType
+) => {
+  const mismatches = [];
+
+  let validCount = 0;
+  let missingCount = 0;
+
+  values.forEach((value, index) => {
+    if (isMissing(value)) {
+      missingCount++;
+      return;
+    }
+
+    const detectedType = classifyValue(value);
+    const valid = detectedType === expectedType;
+
+    if (valid) {
+      validCount++;
+    } else {
+      mismatches.push({
+        row: index + 2,
+        value,
+        detectedType
+      });
+    }
+  });
+
+  const checkedCount =
+    validCount + mismatches.length;
+
+  const mismatchCount = mismatches.length;
+
+  return {
+    expectedType,
+    totalCount: values.length,
+    checkedCount,
+    missingCount,
+    validCount,
+    mismatchCount,
+
+    mismatchPercentage: checkedCount
+      ? round((mismatchCount / checkedCount) * 100)
+      : 0,
+
+    status:
+      checkedCount === 0
+        ? "empty"
+        : mismatchCount === 0
+          ? "valid"
+          : "mismatch",
+
+    mismatches
+  };
+};
+
+// --------------------------------------------------
+// SAFE FORMULA EVALUATOR
+// --------------------------------------------------
+
 const evaluateFormula = (formula, record) => {
   if (typeof formula !== "string" || !formula.trim()) {
     throw new Error("A formula is required");
   }
 
   const tokens =
-    formula.match(/[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?|[()+*/-]/g) || [];
+    formula.match(
+      /[A-Za-z_$][A-Za-z0-9_$]*|\d+(?:\.\d+)?|[()+*/-]/g
+    ) || [];
 
   if (
     tokens.join("").replace(/\s/g, "") !==
     formula.replace(/\s/g, "")
   ) {
-    throw new Error("Formula contains unsupported characters");
+    throw new Error(
+      "Formula contains unsupported characters"
+    );
   }
 
   let position = 0;
@@ -159,7 +225,10 @@ const evaluateFormula = (formula, record) => {
   const parseExpression = () => {
     let value = parseTerm();
 
-    while (tokens[position] === "+" || tokens[position] === "-") {
+    while (
+      tokens[position] === "+" ||
+      tokens[position] === "-"
+    ) {
       const operator = tokens[position++];
       const right = parseTerm();
 
@@ -175,7 +244,10 @@ const evaluateFormula = (formula, record) => {
   const parseTerm = () => {
     let value = parseFactor();
 
-    while (tokens[position] === "*" || tokens[position] === "/") {
+    while (
+      tokens[position] === "*" ||
+      tokens[position] === "/"
+    ) {
       const operator = tokens[position++];
       const right = parseFactor();
 
@@ -203,7 +275,9 @@ const evaluateFormula = (formula, record) => {
       const value = parseExpression();
 
       if (tokens[position++] !== ")") {
-        throw new Error("Unmatched parentheses in formula");
+        throw new Error(
+          "Unmatched parentheses in formula"
+        );
       }
 
       return value;
@@ -216,8 +290,15 @@ const evaluateFormula = (formula, record) => {
       return Number(token);
     }
 
-    if (!Object.prototype.hasOwnProperty.call(record, token)) {
-      throw new Error(`Unknown column in formula: ${token}`);
+    if (
+      !Object.prototype.hasOwnProperty.call(
+        record,
+        token
+      )
+    ) {
+      throw new Error(
+        `Unknown column in formula: ${token}`
+      );
     }
 
     const value = Number(record[token]);
@@ -262,14 +343,17 @@ exports.uploadCSV = [
         });
       }
 
-      const csvContent = req.file.buffer.toString("utf8");
+      const csvContent =
+        req.file.buffer.toString("utf8");
 
       const parsed = Papa.parse(csvContent, {
         header: true,
         skipEmptyLines: true,
         transformHeader: (header) => header.trim(),
         transform: (value) =>
-          typeof value === "string" ? value.trim() : value
+          typeof value === "string"
+            ? value.trim()
+            : value
       });
 
       if (parsed.errors.length > 0) {
@@ -286,7 +370,8 @@ exports.uploadCSV = [
       if (!columns.length || !records.length) {
         return res.status(400).json({
           success: false,
-          message: "The CSV file is empty or has no valid columns"
+          message:
+            "The CSV file is empty or has no valid columns"
         });
       }
 
@@ -300,53 +385,76 @@ exports.uploadCSV = [
       if (new Set(columns).size !== columns.length) {
         return res.status(400).json({
           success: false,
-          message: "The CSV contains duplicate column names"
+          message:
+            "The CSV contains duplicate column names"
         });
       }
 
-      const profiling = profileDataset(records, columns);
+      const profiling = profileDataset(
+        records,
+        columns
+      );
 
       createdDataset = await Dataset.create({
         owner: req.user._id,
-        name: req.file.originalname.replace(/\.csv$/i, ""),
+
+        name: req.file.originalname.replace(
+          /\.csv$/i,
+          ""
+        ),
+
         originalFilename: req.file.originalname,
+
         columns,
         originalColumns: [...columns],
+
         rowCount: records.length,
         columnCount: columns.length,
+
         records,
+
         qualityScore: profiling.qualityScore,
         qualityMetrics: profiling.qualityMetrics,
         issueSummary: profiling.issueSummary,
         outlierSummary: profiling.outlierSummary,
         mlReadiness: profiling.mlReadiness,
+
         correctionOpportunities:
           profiling.correctionOpportunities,
+
         profile: profiling.columns,
         lastAnalysisAt: profiling.analysedAt,
+
         status: "analysed"
       });
 
-      // Preserve the original uploaded dataset as version 1.
       await DatasetVersion.create({
         dataset: createdDataset._id,
         owner: req.user._id,
         versionNumber: 1,
+
         records,
         columns,
         originalColumns: [...columns],
         archivedColumns: [],
+
         rowCount: records.length,
         columnCount: columns.length,
+
         profile: profiling.columns,
+
         qualityScore: profiling.qualityScore,
         qualityMetrics: profiling.qualityMetrics,
         mlReadiness: profiling.mlReadiness,
+
         issueSummary: profiling.issueSummary,
         outlierSummary: profiling.outlierSummary,
+
         correctionOpportunities:
           profiling.correctionOpportunities,
+
         isOriginal: true,
+
         changeSummary: {
           operation: "initial",
           description: "Original CSV uploaded"
@@ -356,22 +464,32 @@ exports.uploadCSV = [
       return res.status(201).json({
         success: true,
         message: "CSV uploaded and analysed successfully",
+
         dataset: {
           id: createdDataset._id,
           name: createdDataset.name,
-          originalFilename: createdDataset.originalFilename,
+          originalFilename:
+            createdDataset.originalFilename,
+
           columns: createdDataset.columns,
+
           rowCount: createdDataset.rowCount,
           columnCount: createdDataset.columnCount,
+
           qualityScore: createdDataset.qualityScore,
           qualityMetrics: createdDataset.qualityMetrics,
+
           issueSummary: createdDataset.issueSummary,
           outlierSummary: createdDataset.outlierSummary,
+
           mlReadiness: createdDataset.mlReadiness,
+
           correctionOpportunities:
             createdDataset.correctionOpportunities,
+
           status: createdDataset.status,
           profile: createdDataset.profile,
+
           lastAnalysisAt: createdDataset.lastAnalysisAt
         }
       });
@@ -380,7 +498,10 @@ exports.uploadCSV = [
 
       if (createdDataset) {
         await Promise.all([
-          Dataset.deleteOne({ _id: createdDataset._id }),
+          Dataset.deleteOne({
+            _id: createdDataset._id
+          }),
+
           DatasetVersion.deleteMany({
             dataset: createdDataset._id
           })
@@ -396,24 +517,122 @@ exports.uploadCSV = [
 ];
 
 // --------------------------------------------------
-// GET DATASETS
+// GET DATASETS WITH PAGINATION AND DATE FILTERS
 // --------------------------------------------------
 
 exports.getDatasets = async (req, res) => {
   try {
-    const datasets = await Dataset.find({
+    const page = Math.max(
+      1,
+      parseInt(req.query.page, 10) || 1
+    );
+
+    const limit = Math.min(
+      50,
+      Math.max(
+        1,
+        parseInt(req.query.limit, 10) || 10
+      )
+    );
+
+    const dateField =
+      req.query.dateField === "analysed"
+        ? "lastAnalysisAt"
+        : "createdAt";
+
+    const sortOrder =
+      req.query.sortOrder === "oldest" ? 1 : -1;
+
+    const filter = {
       owner: req.user._id
-    })
+    };
+
+    const dateFrom = req.query.dateFrom
+      ? new Date(req.query.dateFrom)
+      : null;
+
+    const dateTo = req.query.dateTo
+      ? new Date(req.query.dateTo)
+      : null;
+
+    if (
+      dateFrom &&
+      Number.isNaN(dateFrom.getTime())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid start date"
+      });
+    }
+
+    if (
+      dateTo &&
+      Number.isNaN(dateTo.getTime())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid end date"
+      });
+    }
+
+    if (dateFrom || dateTo) {
+      filter[dateField] = {};
+
+      if (dateFrom) {
+        filter[dateField].$gte = dateFrom;
+      }
+
+      if (dateTo) {
+        dateTo.setHours(23, 59, 59, 999);
+        filter[dateField].$lte = dateTo;
+      }
+    }
+
+    const total = await Dataset.countDocuments(filter);
+
+    const datasets = await Dataset.find(filter)
       .select("-records")
-      .sort({ createdAt: -1 });
+      .sort({
+        [dateField]: sortOrder,
+        _id: sortOrder
+      })
+      .skip((page - 1) * limit)
+      .limit(limit);
 
     return res.status(200).json({
       success: true,
+
       count: datasets.length,
-      datasets
+      datasets,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+
+        hasNextPage: page * limit < total,
+        hasPreviousPage: page > 1
+      },
+
+      filters: {
+        dateField:
+          req.query.dateField === "analysed"
+            ? "analysed"
+            : "uploaded",
+
+        dateFrom: req.query.dateFrom || null,
+        dateTo: req.query.dateTo || null,
+
+        sortOrder:
+          sortOrder === 1 ? "oldest" : "recent"
+      }
     });
   } catch (error) {
-    console.error("Dataset retrieval error:", error.message);
+    console.error(
+      "Dataset retrieval error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -445,7 +664,10 @@ exports.getDatasetById = async (req, res) => {
       dataset
     });
   } catch (error) {
-    console.error("Dataset retrieval error:", error.message);
+    console.error(
+      "Dataset retrieval error:",
+      error.message
+    );
 
     return res.status(400).json({
       success: false,
@@ -484,10 +706,14 @@ exports.deleteDataset = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Dataset and its version history deleted successfully"
+      message:
+        "Dataset and its version history deleted successfully"
     });
   } catch (error) {
-    console.error("Dataset deletion error:", error.message);
+    console.error(
+      "Dataset deletion error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -502,6 +728,26 @@ exports.deleteDataset = async (req, res) => {
 
 exports.validateDatasetSchema = async (req, res) => {
   try {
+    const { column, expectedType } = req.body;
+
+    const allowedTypes = [
+      "numeric",
+      "categorical",
+      "boolean",
+      "date"
+    ];
+
+    if (
+      !column ||
+      !allowedTypes.includes(expectedType)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please provide a valid column and expected data type"
+      });
+    }
+
     const dataset = await findOwnedDataset(
       req.params.id,
       req.user._id
@@ -514,28 +760,44 @@ exports.validateDatasetSchema = async (req, res) => {
       });
     }
 
-    const result = validateColumnSchema(
-      dataset.records,
-      dataset.columns,
-      req.body.schema || {}
+    if (!dataset.columns.includes(column)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "The selected column does not exist in this dataset"
+      });
+    }
+
+    const values = dataset.records.map(
+      (record) => record[column]
+    );
+
+    const validation = validateValuesAgainstType(
+      values,
+      expectedType
     );
 
     return res.status(200).json({
       success: true,
-      validation: result
+      message: "Column schema validation completed",
+      column,
+      validation
     });
   } catch (error) {
-    console.error("Schema validation error:", error);
+    console.error(
+      "Schema validation error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Unable to validate dataset schema"
+      message: "Unable to validate column schema"
     });
   }
 };
 
 // --------------------------------------------------
-// REMOVE COLUMN
+// REMOVE COLUMN (ARCHIVE VALUES FOR RESTORATION)
 // --------------------------------------------------
 
 exports.removeColumn = async (req, res) => {
@@ -555,62 +817,76 @@ exports.removeColumn = async (req, res) => {
     }
 
     if (!dataset.columns.includes(column)) {
-      return res.status(404).json({
+      return res.status(400).json({
         success: false,
-        message: "Column not found"
+        message: "Column does not exist"
       });
     }
 
     if (dataset.columns.length <= 1) {
       return res.status(400).json({
         success: false,
-        message: "A dataset must contain at least one column"
+        message:
+          "A dataset must retain at least one column"
       });
     }
 
-    const previousColumns = [...dataset.columns];
+    const originalIndex =
+      dataset.columns.indexOf(column);
 
-    dataset.columns = dataset.columns.filter(
-      item => item !== column
+    const values = dataset.records.map(
+      (record) => record[column]
     );
 
-    dataset.archivedColumns = [
-      ...(dataset.archivedColumns || []),
-      {
-        name: column,
-        removedAt: new Date(),
-        position: previousColumns.indexOf(column)
-      }
-    ];
+    const profile = dataset.profile.find(
+      (item) => item.column === column
+    );
 
-    dataset.records = dataset.records.map(record => {
+    dataset.archivedColumns.push({
+      name: column,
+      values,
+      originalIndex,
+      profile: profile || null,
+      removedAt: new Date()
+    });
+
+    dataset.records = dataset.records.map((record) => {
       const updated = { ...record };
       delete updated[column];
       return updated;
     });
 
+    dataset.columns = dataset.columns.filter(
+      (item) => item !== column
+    );
+
     await refreshDataset(dataset);
 
-    const version = await createVersionSnapshot(dataset, {
-      operation: "remove_column",
-      description: `Removed column ${column}`,
-      columnsRemoved: 1,
-      structuralChanges: [
-        {
-          action: "remove",
-          column
-        }
-      ]
-    });
+    const version = await createVersionSnapshot(
+      dataset,
+      {
+        operation: "remove_column",
+        description: `Removed column ${column}`,
+        columnsRemoved: 1,
+        columnsModified: 1,
+
+        structuralChanges: [
+          { action: "remove", column }
+        ]
+      }
+    );
 
     return res.status(200).json({
       success: true,
-      message: `Column "${column}" removed successfully`,
+      message: `Column "${column}" archived successfully`,
       dataset,
       versionNumber: version.versionNumber
     });
   } catch (error) {
-    console.error("Remove column error:", error.message);
+    console.error(
+      "Column removal error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -620,7 +896,7 @@ exports.removeColumn = async (req, res) => {
 };
 
 // --------------------------------------------------
-// RESTORE COLUMN
+// RESTORE ARCHIVED COLUMN
 // --------------------------------------------------
 
 exports.restoreColumn = async (req, res) => {
@@ -639,11 +915,12 @@ exports.restoreColumn = async (req, res) => {
       });
     }
 
-    const archived = (dataset.archivedColumns || []).find(
-      item => item.name === column
-    );
+    const archivedIndex =
+      dataset.archivedColumns.findIndex(
+        (item) => item.name === column
+      );
 
-    if (!archived) {
+    if (archivedIndex === -1) {
       return res.status(404).json({
         success: false,
         message: "Archived column not found"
@@ -653,38 +930,61 @@ exports.restoreColumn = async (req, res) => {
     if (dataset.columns.includes(column)) {
       return res.status(400).json({
         success: false,
-        message: "Column already exists"
+        message:
+          "A column with this name already exists"
       });
     }
 
-    dataset.columns.splice(
-      Math.min(archived.position ?? dataset.columns.length, dataset.columns.length),
-      0,
-      column
+    const archived =
+      dataset.archivedColumns[archivedIndex];
+
+    if (
+      !Array.isArray(archived.values) ||
+      archived.values.length !== dataset.records.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Archived column values cannot be restored safely"
+      });
+    }
+
+    dataset.records = dataset.records.map(
+      (record, index) => ({
+        ...record,
+        [column]: archived.values[index]
+      })
     );
 
-    dataset.records = dataset.records.map(record => ({
-      ...record,
-      [column]: null
-    }));
+    const insertAt = Math.max(
+      0,
+      Math.min(
+        archived.originalIndex ?? dataset.columns.length,
+        dataset.columns.length
+      )
+    );
 
-    dataset.archivedColumns = dataset.archivedColumns.filter(
-      item => item.name !== column
+    dataset.columns.splice(insertAt, 0, column);
+
+    dataset.archivedColumns.splice(
+      archivedIndex,
+      1
     );
 
     await refreshDataset(dataset);
 
-    const version = await createVersionSnapshot(dataset, {
-      operation: "restore_column",
-      description: `Restored column ${column}`,
-      columnsAdded: 1,
-      structuralChanges: [
-        {
-          action: "restore",
-          column
-        }
-      ]
-    });
+    const version = await createVersionSnapshot(
+      dataset,
+      {
+        operation: "restore_column",
+        description: `Restored column ${column}`,
+        columnsAdded: 1,
+
+        structuralChanges: [
+          { action: "restore", column }
+        ]
+      }
+    );
 
     return res.status(200).json({
       success: true,
@@ -693,7 +993,10 @@ exports.restoreColumn = async (req, res) => {
       versionNumber: version.versionNumber
     });
   } catch (error) {
-    console.error("Restore column error:", error.message);
+    console.error(
+      "Column restoration error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -703,7 +1006,7 @@ exports.restoreColumn = async (req, res) => {
 };
 
 // --------------------------------------------------
-// RENAME COLUMN
+// RENAME ONE COLUMN
 // --------------------------------------------------
 
 exports.renameColumn = async (req, res) => {
@@ -717,8 +1020,6 @@ exports.renameColumn = async (req, res) => {
       });
     }
 
-    const trimmedName = newName.trim();
-
     const dataset = await findOwnedDataset(
       req.params.id,
       req.user._id
@@ -731,76 +1032,103 @@ exports.renameColumn = async (req, res) => {
       });
     }
 
+    const trimmedName = newName.trim();
+
     if (!dataset.columns.includes(oldName)) {
       return res.status(404).json({
         success: false,
-        message: "Column not found"
+        message: "Original column not found"
       });
     }
 
     if (
-      dataset.columns.includes(trimmedName) &&
-      oldName !== trimmedName
+      oldName !== trimmedName &&
+      (
+        dataset.columns.includes(trimmedName) ||
+        dataset.archivedColumns.some(
+          (item) => item.name === trimmedName
+        )
+      )
     ) {
       return res.status(400).json({
         success: false,
-        message: "A column with that name already exists"
+        message:
+          "A column with this name already exists"
       });
     }
 
     if (oldName === trimmedName) {
-      return res.status(400).json({
-        success: false,
-        message: "The new name is the same as the old name"
+      return res.status(200).json({
+        success: true,
+        message: "Column name is unchanged"
       });
     }
 
-    dataset.columns = dataset.columns.map(column =>
-      column === oldName ? trimmedName : column
+    dataset.records = dataset.records.map((record) => {
+      const updated = { ...record };
+
+      updated[trimmedName] = updated[oldName];
+
+      delete updated[oldName];
+
+      return updated;
+    });
+
+    dataset.columns = dataset.columns.map(
+      (column) =>
+        column === oldName
+          ? trimmedName
+          : column
     );
 
     dataset.originalColumns = (
       dataset.originalColumns || []
-    ).map(column =>
-      column === oldName ? trimmedName : column
+    ).map(
+      (column) =>
+        column === oldName
+          ? trimmedName
+          : column
     );
 
-    dataset.archivedColumns = (
-      dataset.archivedColumns || []
-    ).map(item => ({
-      ...item.toObject?.() ?? item,
-      name: item.name === oldName ? trimmedName : item.name
-    }));
-
-    dataset.records = dataset.records.map(record => {
-      const updated = { ...record };
-      updated[trimmedName] = updated[oldName];
-      delete updated[oldName];
-      return updated;
-    });
+    dataset.archivedColumns =
+      dataset.archivedColumns.map(
+        (item) =>
+          item.name === oldName
+            ? { ...item, name: trimmedName }
+            : item
+      );
 
     await refreshDataset(dataset);
 
-    const version = await createVersionSnapshot(dataset, {
-      operation: "rename_column",
-      description: `Renamed ${oldName} to ${trimmedName}`,
-      structuralChanges: [
-        {
-          action: "rename",
-          oldName,
-          newName: trimmedName
-        }
-      ]
-    });
+    const version = await createVersionSnapshot(
+      dataset,
+      {
+        operation: "rename_column",
+        description:
+          `Renamed ${oldName} to ${trimmedName}`,
+        columnsRenamed: 1,
+
+        structuralChanges: [
+          {
+            action: "rename",
+            oldName,
+            newName: trimmedName
+          }
+        ]
+      }
+    );
 
     return res.status(200).json({
       success: true,
-      message: `Column renamed to "${trimmedName}"`,
+      message: "Column renamed successfully",
       dataset,
       versionNumber: version.versionNumber
     });
   } catch (error) {
-    console.error("Rename column error:", error.message);
+    console.error(
+      "Column rename error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -810,7 +1138,7 @@ exports.renameColumn = async (req, res) => {
 };
 
 // --------------------------------------------------
-// RENAME MULTIPLE COLUMNS
+// BULK RENAME COLUMNS
 // --------------------------------------------------
 
 exports.renameAllColumns = async (req, res) => {
@@ -824,7 +1152,7 @@ exports.renameAllColumns = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Provide a valid column rename object"
+        message: "Provide a column rename mapping"
       });
     }
 
@@ -840,65 +1168,91 @@ exports.renameAllColumns = async (req, res) => {
       });
     }
 
-    const updatedColumns = dataset.columns.map(column =>
-      renames[column] ? String(renames[column]).trim() : column
+    const newColumns = dataset.columns.map(
+      (column) =>
+        Object.prototype.hasOwnProperty.call(
+          renames,
+          column
+        )
+          ? String(renames[column]).trim()
+          : column
     );
 
-    if (updatedColumns.some(column => !validateColumnName(column))) {
+    if (
+      newColumns.some(
+        (column) => !validateColumnName(column)
+      ) ||
+      new Set(newColumns).size !== newColumns.length
+    ) {
       return res.status(400).json({
         success: false,
-        message: "One or more column names are invalid"
+        message:
+          "Column names must be non-empty and unique"
       });
     }
 
-    if (new Set(updatedColumns).size !== updatedColumns.length) {
-      return res.status(400).json({
-        success: false,
-        message: "Column names must be unique"
+    const changed = dataset.columns.filter(
+      (column, index) =>
+        column !== newColumns[index]
+    );
+
+    if (!changed.length) {
+      return res.status(200).json({
+        success: true,
+        message:
+          "No column names needed changing"
       });
     }
 
-    const structuralChanges = [];
+    const renameMap = {};
 
-    dataset.records = dataset.records.map(record => {
+    dataset.columns.forEach((column, index) => {
+      renameMap[column] = newColumns[index];
+    });
+
+    dataset.records = dataset.records.map((record) => {
       const updated = {};
 
-      dataset.columns.forEach(oldName => {
-        const newName = renames[oldName]
-          ? String(renames[oldName]).trim()
-          : oldName;
-
-        updated[newName] = record[oldName];
-
-        if (newName !== oldName) {
-          structuralChanges.push({
-            action: "rename",
-            oldName,
-            newName
-          });
-        }
+      dataset.columns.forEach((column) => {
+        updated[renameMap[column]] = record[column];
       });
 
       return updated;
     });
 
+    dataset.columns = newColumns;
+
     dataset.originalColumns = (
       dataset.originalColumns || []
-    ).map(column =>
-      renames[column]
-        ? String(renames[column]).trim()
-        : column
+    ).map(
+      (column) => renameMap[column] || column
     );
 
-    dataset.columns = updatedColumns;
+    dataset.archivedColumns =
+      dataset.archivedColumns.map((item) => ({
+        ...item,
+        name: renameMap[item.name] || item.name
+      }));
 
     await refreshDataset(dataset);
 
-    const version = await createVersionSnapshot(dataset, {
-      operation: "rename_columns",
-      description: "Renamed multiple columns",
-      structuralChanges
-    });
+    const version = await createVersionSnapshot(
+      dataset,
+      {
+        operation: "bulk_rename_columns",
+        description:
+          `Renamed ${changed.length} columns`,
+        columnsRenamed: changed.length,
+
+        structuralChanges: changed.map(
+          (oldName) => ({
+            action: "rename",
+            oldName,
+            newName: renameMap[oldName]
+          })
+        )
+      }
+    );
 
     return res.status(200).json({
       success: true,
@@ -907,7 +1261,10 @@ exports.renameAllColumns = async (req, res) => {
       versionNumber: version.versionNumber
     });
   } catch (error) {
-    console.error("Rename columns error:", error.message);
+    console.error(
+      "Bulk rename error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
@@ -923,20 +1280,22 @@ exports.renameAllColumns = async (req, res) => {
 exports.addColumn = async (req, res) => {
   try {
     const {
-      columnName,
+      name,
       type,
       value,
+      start,
+      step,
+      startDate,
+      interval,
       formula
     } = req.body;
 
-    if (!validateColumnName(columnName)) {
+    if (!validateColumnName(name)) {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid column name"
       });
     }
-
-    const trimmedName = columnName.trim();
 
     const dataset = await findOwnedDataset(
       req.params.id,
@@ -950,26 +1309,97 @@ exports.addColumn = async (req, res) => {
       });
     }
 
-    if (dataset.columns.includes(trimmedName)) {
+    const columnName = name.trim();
+
+    if (
+      dataset.columns.includes(columnName) ||
+      dataset.archivedColumns.some(
+        (item) => item.name === columnName
+      )
+    ) {
       return res.status(400).json({
         success: false,
-        message: "A column with that name already exists"
+        message:
+          "This column name is already in use"
       });
     }
 
     let values = [];
 
     switch (type) {
-      case "constant":
-        values = dataset.records.map(() => value ?? null);
+      case "fixed":
+        values = dataset.records.map(
+          () => value ?? ""
+        );
         break;
 
-      case "empty":
-        values = dataset.records.map(() => null);
+      case "increment": {
+        const first = Number(start ?? 1);
+        const increment = Number(step ?? 1);
+
+        if (
+          !Number.isFinite(first) ||
+          !Number.isFinite(increment)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Start and step must be valid numbers"
+          });
+        }
+
+        values = dataset.records.map(
+          (_, index) =>
+            first + index * increment
+        );
+
         break;
+      }
+
+      case "date_sequence": {
+        const firstDate = new Date(startDate);
+
+        const allowedIntervals = [
+          "daily",
+          "monthly",
+          "yearly"
+        ];
+
+        if (
+          Number.isNaN(firstDate.getTime()) ||
+          !allowedIntervals.includes(interval)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Provide a valid start date and interval"
+          });
+        }
+
+        values = dataset.records.map((_, index) => {
+          const date = new Date(firstDate);
+
+          if (interval === "daily") {
+            date.setDate(date.getDate() + index);
+          } else if (interval === "monthly") {
+            date.setMonth(date.getMonth() + index);
+          } else {
+            date.setFullYear(
+              date.getFullYear() + index
+            );
+          }
+
+          return date.toISOString().slice(0, 10);
+        });
+
+        break;
+      }
 
       case "formula":
-        if (typeof formula !== "string" || !formula.trim()) {
+        if (
+          !formula ||
+          typeof formula !== "string"
+        ) {
           return res.status(400).json({
             success: false,
             message: "Provide a valid formula"
@@ -977,8 +1407,9 @@ exports.addColumn = async (req, res) => {
         }
 
         try {
-          values = dataset.records.map((record) =>
-            evaluateFormula(formula, record)
+          values = dataset.records.map(
+            (record) =>
+              evaluateFormula(formula, record)
           );
         } catch (error) {
           return res.status(400).json({
@@ -986,45 +1417,57 @@ exports.addColumn = async (req, res) => {
             message: error.message
           });
         }
+
         break;
 
       default:
         return res.status(400).json({
           success: false,
-          message: "Unsupported column creation type"
+          message:
+            "Unsupported column creation type"
         });
     }
 
-    dataset.records = dataset.records.map((record, index) => ({
-      ...record,
-      [trimmedName]: values[index]
-    }));
+    dataset.records = dataset.records.map(
+      (record, index) => ({
+        ...record,
+        [columnName]: values[index]
+      })
+    );
 
-    dataset.columns.push(trimmedName);
+    dataset.columns.push(columnName);
 
     await refreshDataset(dataset);
 
-    const version = await createVersionSnapshot(dataset, {
-      operation: "add_column",
-      description: `Added column ${trimmedName}`,
-      columnsAdded: 1,
-      structuralChanges: [
-        {
-          action: "add",
-          column: trimmedName,
-          type
-        }
-      ]
-    });
+    const version = await createVersionSnapshot(
+      dataset,
+      {
+        operation: "add_column",
+        description: `Added column ${columnName}`,
+        columnsAdded: 1,
+
+        structuralChanges: [
+          {
+            action: "add",
+            column: columnName,
+            type
+          }
+        ]
+      }
+    );
 
     return res.status(201).json({
       success: true,
-      message: `Column "${trimmedName}" added successfully`,
+      message:
+        `Column "${columnName}" added successfully`,
       dataset,
       versionNumber: version.versionNumber
     });
   } catch (error) {
-    console.error("Add column error:", error.message);
+    console.error(
+      "Add column error:",
+      error.message
+    );
 
     return res.status(500).json({
       success: false,
